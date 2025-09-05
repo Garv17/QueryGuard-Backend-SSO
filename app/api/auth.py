@@ -8,6 +8,7 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
+from uuid import UUID
 from jose import jwt, JWTError
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -49,10 +50,10 @@ class ResetPassword(BaseModel):
     new_password: str
 
 class UserResponse(BaseModel):
-    id: str
+    id: UUID
     username: str
     email: str
-    org_id: str
+    org_id: UUID
 
     class Config:
         from_attributes = True
