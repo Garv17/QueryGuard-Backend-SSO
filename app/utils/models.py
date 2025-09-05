@@ -1,0 +1,179 @@
+from sqlalchemy import Column, String, DateTime, Text, Boolean, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+from app.database import Base
+import uuid
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(100), nullable=False, index=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationship
+    users = relationship("User", back_populates="organization")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    email = Column(String(100), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    password_reset_otp = Column(String(6), nullable=True)
+    reset_otp_expires = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationship
+    organization = relationship("Organization", back_populates="users")
+
+
+class UserToken(Base):
+    __tablename__ = "user_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    token = Column(Text, nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    is_revoked = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SnowflakeConnection(Base):
+    __tablename__ = "snowflake_connections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    connection_name = Column(String(100), nullable=False)
+    account = Column(String(100), nullable=False)
+    username = Column(String(100), nullable=False)
+    password = Column(String(255), nullable=False)
+    warehouse = Column(String(100), nullable=True)
+    role = Column(String(100), nullable=True)
+    cron_expression = Column(String(100), nullable=True)  # Miner config
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", backref="snowflake_connections")
+    databases = relationship("SnowflakeDatabase", back_populates="connection", cascade="all, delete-orphan")
+
+
+class SnowflakeDatabase(Base):
+    __tablename__ = "snowflake_databases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
+    database_name = Column(String(100), nullable=False)
+    is_selected = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    connection = relationship("SnowflakeConnection", back_populates="databases")
+    schemas = relationship("SnowflakeSchema", back_populates="database", cascade="all, delete-orphan")
+
+
+class SnowflakeSchema(Base):
+    __tablename__ = "snowflake_schemas"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    database_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_databases.id"), nullable=False, index=True)
+    schema_name = Column(String(100), nullable=False)
+    is_selected = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    database = relationship("SnowflakeDatabase", back_populates="schemas")
+
+
+class GitHubInstallation(Base):
+    __tablename__ = "github_installations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    installation_id = Column(String(50), unique=True, nullable=False, index=True)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    account_type = Column(String(20), nullable=False)  # 'User' or 'Organization'
+    account_login = Column(String(100), nullable=False)
+    repository_selection = Column(String(20), nullable=False)  # 'all' or 'selected'
+    permissions = Column(Text, nullable=True)  # JSON string of permissions
+    events = Column(Text, nullable=True)  # JSON string of events
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", backref="github_installations")
+    repositories = relationship("GitHubRepository", back_populates="installation", cascade="all, delete-orphan")
+
+
+class GitHubRepository(Base):
+    __tablename__ = "github_repositories"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    installation_id = Column(UUID(as_uuid=True), ForeignKey("github_installations.id"), nullable=False, index=True)
+    repo_id = Column(String(50), nullable=False, index=True)
+    repo_name = Column(String(200), nullable=False)
+    full_name = Column(String(200), nullable=False)
+    private = Column(Boolean, default=False)
+    description = Column(Text, nullable=True)
+    default_branch = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    installation = relationship("GitHubInstallation", back_populates="repositories")
+
+
+# New code
+
+class JiraConnection(Base):
+    __tablename__ = "jira_connections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    connection_name = Column(String(100), nullable=False)
+    server_url = Column(String(255), nullable=False)  # e.g., https://company.atlassian.net
+    username = Column(String(100), nullable=False)  # Email for Atlassian Cloud
+    api_token = Column(String(255), nullable=False)  # API token or password
+    project_key = Column(String(20), nullable=False)  # Default project key for tickets
+    issue_type = Column(String(50), default="Task")  # Default issue type
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", backref="jira_connections")
+
+
+class JiraTicket(Base):
+    __tablename__ = "jira_tickets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("jira_connections.id"), nullable=False, index=True)
+    ticket_key = Column(String(50), nullable=False, index=True)  # e.g., PROJ-123
+    ticket_url = Column(String(500), nullable=False)
+    summary = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    issue_type = Column(String(50), nullable=False)
+    status = Column(String(50), nullable=False)
+    priority = Column(String(50), nullable=True)
+    assignee = Column(String(100), nullable=True)
+    pr_url = Column(String(500), nullable=True)  # Related PR URL
+    analysis_report_url = Column(String(500), nullable=True)  # Analysis report URL
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    connection = relationship("JiraConnection", backref="tickets")
+    creator = relationship("User", backref="created_jira_tickets")
