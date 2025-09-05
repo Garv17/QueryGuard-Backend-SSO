@@ -19,9 +19,16 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 # )
 
 from dotenv import load_dotenv
-load_dotenv() 
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+# Normalize driver to psycopg (v3) to avoid psycopg2 build issues on some platforms
+if DATABASE_URL and DATABASE_URL.startswith("postgresql+psycopg2://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
+elif DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
+    # If no explicit driver, prefer psycopg v3
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
