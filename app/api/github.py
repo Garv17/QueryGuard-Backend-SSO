@@ -143,7 +143,7 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
 
     event = request.headers.get("X-GitHub-Event")
     payload = json.loads(body)
-
+    print(payload)
     if event == "installation" and payload["action"] == "created":
         installation_id = str(payload["installation"]["id"])
         account = payload["installation"]["account"]
