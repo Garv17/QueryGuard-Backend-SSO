@@ -1,12 +1,10 @@
-# app/api/github.py
-
 import os
 import json
 import hmac
 import hashlib
 import time
 import uuid
-from typing import Optional, List
+from typing import Optional
 
 import jwt  # pyjwt
 import requests
@@ -85,10 +83,19 @@ def github_callback(
     if not state:
         return {"message": "Installation ignored - no state param"}
 
+    # Validate state format
     try:
         org_uuid = uuid.UUID(state)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid state parameter")
+
+    # 🔒 Validate org exists in DB
+    org = db.query(Organization).filter(
+        Organization.id == org_uuid,
+        Organization.is_active == True
+    ).first()
+    if not org:
+        raise HTTPException(status_code=403, detail="Organization not found or inactive")
 
     # Exchange JWT for installation token
     token = get_installation_token(installation_id)
@@ -103,7 +110,7 @@ def github_callback(
     account = inst_data["account"]
     repo_selection = inst_data.get("repository_selection", "all")
 
-    # Save in DB
+    # Save installation in DB
     installation = GitHubInstallation(
         installation_id=installation_id,
         org_id=org_uuid,
@@ -118,7 +125,12 @@ def github_callback(
     db.commit()
     db.refresh(installation)
 
-    return {"message": "Installation recorded", "installation_id": installation_id, "org": account["login"]}
+    return {
+        "message": "Installation recorded",
+        "installation_id": installation_id,
+        "org": account["login"],
+        "org_id": str(org_uuid)
+    }
 
 
 @router.post("/webhook")
@@ -138,10 +150,14 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
         repos = payload.get("repositories", [])
 
         inst = db.query(GitHubInstallation).filter_by(installation_id=installation_id).first()
-        if inst:
-            inst.account_login = account["login"]
-            inst.account_type = account["type"]
-            db.commit()
+
+        # 🔒 Only update if linked to a valid SaaS org (from callback)
+        if not inst:
+            return {"message": "Ignored unlinked installation"}
+
+        inst.account_login = account["login"]
+        inst.account_type = account["type"]
+        db.commit()
 
         # Save repos
         for repo in repos:
