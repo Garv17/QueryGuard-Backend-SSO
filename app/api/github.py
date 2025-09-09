@@ -20,15 +20,20 @@ from app.api.auth import get_current_user
 import uuid
 from uuid import UUID
 from datetime import datetime
+import os
+import logging
 
 router = APIRouter(prefix="/github", tags=["GitHub"])
 
 # --- Configuration ---
 # TODO: Update these values for your GitHub App
 GITHUB_APP_URL = "https://github.com/apps/queryguardai-poc"
-CALLBACK_URL = "https://your-backend.com/github/callback"  # Update this
+CALLBACK_URL = os.getenv("GITHUB_CALLBACK_URL", "")
 GITHUB_API_BASE = "https://api.github.com"
-WEBHOOK_SECRET = "your-webhook-secret"  # Update this with your GitHub App webhook secret
+WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "")
+
+logger = logging.getLogger("github")
+logging.basicConfig(level=logging.INFO)
 
 # GitHub App permissions and events
 GITHUB_PERMISSIONS = {
@@ -164,11 +169,12 @@ def github_install(org_id: str, request: Request):
         # Validate org_id format
         uuid.UUID(org_id)
     except ValueError:
+        logger.warning("/github/install - invalid org_id: %s", org_id)
         raise HTTPException(status_code=400, detail="Invalid organization ID format")
     
     # Build GitHub App installation URL with state parameter
     install_url = f"{GITHUB_APP_URL}/installations/new?state={org_id}"
-    
+    logger.info("/github/install - redirecting to %s", install_url)
     return RedirectResponse(url=install_url)
 
 
@@ -180,7 +186,8 @@ def github_callback(
     db: Session = Depends(get_db)
 ):
     """Handle GitHub App installation callback"""
-    
+    logger.info("GitHub callback received installation_id=%s setup_action=%s state=%s", installation_id, setup_action, state)
+
     # If no state parameter, ignore the installation (not from our flow)
     if not state:
         return {"message": "Installation ignored - no state parameter"}
@@ -189,6 +196,7 @@ def github_callback(
         # Validate state (org_id) format
         org_uuid = uuid.UUID(state)
     except ValueError:
+        logger.warning("/github/callback - invalid state format: %s", state)
         raise HTTPException(status_code=400, detail="Invalid state parameter")
     
     # Check if organization exists
@@ -198,6 +206,7 @@ def github_callback(
     ).first()
     
     if not organization:
+        logger.warning("/github/callback - organization not found: %s", org_uuid)
         raise HTTPException(status_code=404, detail="Organization not found")
     
     # Check if installation already exists
@@ -206,6 +215,7 @@ def github_callback(
     ).first()
     
     if existing_installation:
+        logger.info("/github/callback - installation already exists: %s", installation_id)
         raise HTTPException(status_code=400, detail="Installation already exists")
     
     try:
@@ -226,11 +236,19 @@ def github_callback(
         db.add(new_installation)
         db.commit()
         db.refresh(new_installation)
+        logger.info("/github/callback - installation saved id=%s org_id=%s", new_installation.id, org_uuid)
         
+        # Optional: redirect to your frontend success page if CALLBACK_URL is set
+        if CALLBACK_URL:
+            # Append org_id and installation_id for UI to consume
+            redirect_url = f"{CALLBACK_URL}?org_id={org_uuid}&installation_id={installation_id}&status=success"
+            return RedirectResponse(url=str(redirect_url))
+
         return new_installation
         
     except IntegrityError:
         db.rollback()
+        logger.exception("/github/callback - failed to save installation")
         raise HTTPException(status_code=400, detail="Failed to save installation")
 
 
@@ -336,26 +354,31 @@ async def github_webhook(request: Request):
     # Get GitHub signature header
     signature = request.headers.get("X-Hub-Signature-256")
     if not signature:
+        logger.warning("/github/webhook - missing signature header")
         raise HTTPException(status_code=401, detail="Missing signature")
     
     # Verify webhook signature
     if not verify_webhook_signature(body, signature):
+        logger.warning("/github/webhook - invalid signature")
         raise HTTPException(status_code=401, detail="Invalid signature")
     
     # Get event type
     event_type = request.headers.get("X-GitHub-Event")
     if event_type != "pull_request":
+        logger.info("/github/webhook - ignoring event %s", event_type)
         return {"message": f"Ignoring {event_type} event"}
     
     # Parse the webhook payload
     try:
         payload = json.loads(body.decode())
     except json.JSONDecodeError:
+        logger.warning("/github/webhook - invalid JSON payload")
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
     
     # Extract PR information
     action = payload.get("action")
     if action not in ["opened", "reopened"]:
+        logger.info("/github/webhook - ignoring PR action %s", action)
         return {"message": f"Ignoring PR {action} action"}
     
     pr_data = payload.get("pull_request", {})
@@ -372,6 +395,7 @@ async def github_webhook(request: Request):
     # TODO: Store PR data in database for processing
     # TODO: Trigger downstream analysis based on PR changes
     
+    logger.info("/github/webhook - processed PR #%s on %s (installation %s)", pr_number, repo_full_name, installation_id)
     return {
         "message": "PR webhook processed",
         "pr_number": pr_number,
