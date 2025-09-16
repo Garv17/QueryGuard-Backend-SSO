@@ -6,7 +6,7 @@
 # GET /jira/projects/{connection_id} → get available projects
 # GET /jira/issue-types/{connection_id}/{project_key} → get issue types for project
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
@@ -20,8 +20,10 @@ from datetime import datetime
 from app.database import get_db
 from app.utils.models import JiraConnection, JiraTicket, User
 from app.api.auth import get_current_user
+import logging
 
 router = APIRouter(prefix="/jira", tags=["Jira"])
+logger = logging.getLogger("jira")
 
 
 # --- Helpers ---
@@ -43,6 +45,7 @@ def test_jira_connection(server_url: str, username: str, api_token: str) -> bool
         )
         
         if response.status_code == 200:
+            logger.info("/jira/test-connection - success for %s", username)
             return True
         else:
             raise HTTPException(
@@ -50,6 +53,7 @@ def test_jira_connection(server_url: str, username: str, api_token: str) -> bool
                 detail=f"Connection failed: {response.status_code} - {response.text}"
             )
     except requests.exceptions.RequestException as e:
+        logger.warning("/jira/test-connection - request error: %s", str(e))
         raise HTTPException(
             status_code=400, 
             detail=f"Connection failed: {str(e)}"
@@ -71,6 +75,7 @@ def get_jira_projects(server_url: str, username: str, api_token: str) -> List[di
         
         if response.status_code == 200:
             projects = response.json()
+            logger.info("/jira/projects - fetched %d projects", len(projects))
             return [{"key": p["key"], "name": p["name"], "id": p["id"]} for p in projects]
         else:
             raise HTTPException(
@@ -78,6 +83,7 @@ def get_jira_projects(server_url: str, username: str, api_token: str) -> List[di
                 detail=f"Failed to get projects: {response.status_code} - {response.text}"
             )
     except requests.exceptions.RequestException as e:
+        logger.warning("/jira/projects - request error: %s", str(e))
         raise HTTPException(status_code=400, detail=f"Failed to get projects: {str(e)}")
 
 def get_jira_issue_types(server_url: str, username: str, api_token: str, project_key: str) -> List[dict]:
@@ -97,6 +103,7 @@ def get_jira_issue_types(server_url: str, username: str, api_token: str, project
         if response.status_code == 200:
             project_data = response.json()
             issue_types = project_data.get("issueTypes", [])
+            logger.info("/jira/issue-types - fetched %d issue types for %s", len(issue_types), project_key)
             return [{"id": it["id"], "name": it["name"], "description": it.get("description", "")} for it in issue_types]
         else:
             raise HTTPException(
@@ -104,6 +111,7 @@ def get_jira_issue_types(server_url: str, username: str, api_token: str, project
                 detail=f"Failed to get issue types: {response.status_code} - {response.text}"
             )
     except requests.exceptions.RequestException as e:
+        logger.warning("/jira/issue-types - request error: %s", str(e))
         raise HTTPException(status_code=400, detail=f"Failed to get issue types: {str(e)}")
 
 def create_jira_issue(
@@ -153,6 +161,7 @@ def create_jira_issue(
         
         if response.status_code == 201:
             issue_response = response.json()
+            logger.info("/jira/create-issue - created %s", issue_response.get("key"))
             return {
                 "key": issue_response["key"],
                 "id": issue_response["id"],
@@ -164,6 +173,7 @@ def create_jira_issue(
                 detail=f"Failed to create issue: {response.status_code} - {response.text}"
             )
     except requests.exceptions.RequestException as e:
+        logger.warning("/jira/create-issue - request error: %s", str(e))
         raise HTTPException(status_code=400, detail=f"Failed to create issue: {str(e)}")
 
 
@@ -231,9 +241,11 @@ class IssueTypeResponse(BaseModel):
 @router.post("/test-connection")
 def test_connection(
     conn: JiraConnectionRequest, 
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """Test Jira connection before saving"""
+    logger.info("/jira/test-connection - org_id=%s user_id=%s", current_user.org_id, current_user.id)
     success = test_jira_connection(
         server_url=str(conn.server_url),
         username=conn.username,
@@ -248,7 +260,8 @@ def test_connection(
 def save_connection(
     conn: JiraConnectionRequest, 
     current_user: User = Depends(get_current_user), 
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     """Save Jira connection after successful test"""
     # Test connection before saving
@@ -262,6 +275,7 @@ def save_connection(
     ).first()
     
     if existing_conn:
+        logger.warning("/jira/save-connection - name exists %s", conn.connection_name)
         raise HTTPException(
             status_code=400, 
             detail="Connection name already exists for this organization"
@@ -274,6 +288,7 @@ def save_connection(
     ).first()
     
     if active_conn:
+        logger.warning("/jira/save-connection - active connection already exists for org %s", current_user.org_id)
         raise HTTPException(
             status_code=400,
             detail="Only one active Jira connection allowed per organization"
@@ -293,22 +308,26 @@ def save_connection(
         db.add(new_connection)
         db.commit()
         db.refresh(new_connection)
+        logger.info("/jira/save-connection - saved id=%s", new_connection.id)
         return new_connection
     except IntegrityError:
         db.rollback()
+        logger.exception("/jira/save-connection - failed to save connection")
         raise HTTPException(status_code=400, detail="Failed to save connection")
 
 
 @router.get("/connections", response_model=List[JiraConnectionResponse])
 def list_connections(
     current_user: User = Depends(get_current_user), 
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     """List all Jira connections for the organization"""
     connections = db.query(JiraConnection).filter(
         JiraConnection.org_id == current_user.org_id,
         JiraConnection.is_active == True
     ).all()
+    logger.debug("/jira/connections - list count=%d", len(connections))
     return connections
 
 
@@ -316,12 +335,14 @@ def list_connections(
 def get_projects(
     connection_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     """Get available projects for a Jira connection"""
     try:
         conn_uuid = uuid.UUID(connection_id)
     except ValueError:
+        logger.warning("/jira/projects - invalid id %s", connection_id)
         raise HTTPException(status_code=400, detail="Invalid connection ID format")
 
     # Get connection details
@@ -332,6 +353,7 @@ def get_projects(
     ).first()
     
     if not connection:
+        logger.warning("/jira/projects - connection not found %s", conn_uuid)
         raise HTTPException(status_code=404, detail="Jira connection not found")
 
     projects = get_jira_projects(
@@ -340,6 +362,7 @@ def get_projects(
         api_token=connection.api_token
     )
     
+    logger.info("/jira/projects - returning %d projects", len(projects))
     return projects
 
 
@@ -348,12 +371,14 @@ def get_issue_types(
     connection_id: str,
     project_key: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     """Get available issue types for a project"""
     try:
         conn_uuid = uuid.UUID(connection_id)
     except ValueError:
+        logger.warning("/jira/issue-types - invalid id %s", connection_id)
         raise HTTPException(status_code=400, detail="Invalid connection ID format")
 
     # Get connection details
@@ -364,6 +389,7 @@ def get_issue_types(
     ).first()
     
     if not connection:
+        logger.warning("/jira/issue-types - connection not found %s", conn_uuid)
         raise HTTPException(status_code=404, detail="Jira connection not found")
 
     issue_types = get_jira_issue_types(
@@ -373,6 +399,7 @@ def get_issue_types(
         project_key=project_key
     )
     
+    logger.info("/jira/issue-types - returning %d issue types", len(issue_types))
     return issue_types
 
 
@@ -380,12 +407,14 @@ def get_issue_types(
 def create_ticket(
     ticket_request: CreateTicketRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     """Create a Jira ticket"""
     try:
         conn_uuid = uuid.UUID(ticket_request.connection_id)
     except ValueError:
+        logger.warning("/jira/create-ticket - invalid connection id %s", ticket_request.connection_id)
         raise HTTPException(status_code=400, detail="Invalid connection ID format")
 
     # Get connection details
@@ -396,6 +425,7 @@ def create_ticket(
     ).first()
     
     if not connection:
+        logger.warning("/jira/create-ticket - connection not found %s", conn_uuid)
         raise HTTPException(status_code=404, detail="Jira connection not found")
 
     # Use connection defaults if not provided
@@ -434,23 +464,26 @@ def create_ticket(
         db.add(new_ticket)
         db.commit()
         db.refresh(new_ticket)
+        logger.info("/jira/create-ticket - saved ticket id=%s key=%s", new_ticket.id, new_ticket.ticket_key)
         return new_ticket
     except IntegrityError:
         db.rollback()
+        logger.exception("/jira/create-ticket - failed to save ticket")
         raise HTTPException(status_code=400, detail="Failed to save ticket details")
 
 
 @router.get("/tickets", response_model=List[TicketResponse])
 def list_tickets(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     """List all Jira tickets for the organization"""
     tickets = db.query(JiraTicket).join(JiraConnection).filter(
         JiraConnection.org_id == current_user.org_id,
         JiraConnection.is_active == True
     ).all()
-    
+    logger.debug("/jira/tickets - list count=%d", len(tickets))
     return tickets
 
 
@@ -458,12 +491,14 @@ def list_tickets(
 def deactivate_connection(
     connection_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     """Deactivate a Jira connection (soft delete)"""
     try:
         conn_uuid = uuid.UUID(connection_id)
     except ValueError:
+        logger.warning("/jira/deactivate-connection - invalid id %s", connection_id)
         raise HTTPException(status_code=400, detail="Invalid connection ID format")
 
     connection = db.query(JiraConnection).filter(
@@ -473,13 +508,16 @@ def deactivate_connection(
     ).first()
     
     if not connection:
+        logger.warning("/jira/deactivate-connection - connection not found %s", conn_uuid)
         raise HTTPException(status_code=404, detail="Jira connection not found")
 
     connection.is_active = False
     
     try:
         db.commit()
+        logger.info("/jira/deactivate-connection - deactivated id=%s", connection.id)
         return {"message": "Jira connection deactivated successfully"}
     except IntegrityError:
         db.rollback()
+        logger.exception("/jira/deactivate-connection - failed to deactivate")
         raise HTTPException(status_code=400, detail="Failed to deactivate connection")

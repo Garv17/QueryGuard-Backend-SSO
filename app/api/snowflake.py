@@ -4,7 +4,7 @@
 # GET /snowflake/fetch-schemas/{database} → fetch schemas for selected DB
 # POST /snowflake/save-schema-selection → save DB + schema selections
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List
@@ -16,8 +16,10 @@ from app.api.auth import get_current_user
 import uuid
 from uuid import UUID
 from datetime import datetime
+import logging
 
 router = APIRouter(prefix="/snowflake", tags=["Snowflake"])
+logger = logging.getLogger("snowflake")
 
 
 # --- Helpers ---
@@ -32,8 +34,10 @@ def test_connection(account, username, password, warehouse=None, database=None, 
             schema=schema
         )
         conn.close()
+        logger.info("/snowflake/test-connection - success for user=%s account=%s", username, account)
         return True
     except Exception as e:
+        logger.warning("/snowflake/test-connection - failed: %s", str(e))
         raise HTTPException(status_code=400, detail=f"Connection failed: {str(e)}")
 
 
@@ -88,7 +92,7 @@ class SchemaResponse(BaseModel):
 
 # --- Endpoints ---
 @router.post("/test-connection")
-def snowflake_test_connection(conn: SnowflakeConn, current_user: User = Depends(get_current_user)):
+def snowflake_test_connection(conn: SnowflakeConn, current_user: User = Depends(get_current_user), request: Request = None):
     """Test Snowflake connection before saving"""
     success = test_connection(
         account=conn.account,
@@ -100,7 +104,7 @@ def snowflake_test_connection(conn: SnowflakeConn, current_user: User = Depends(
 
 
 @router.post("/save-connection", response_model=ConnectionResponse, status_code=status.HTTP_201_CREATED)
-def save_connection(conn: SnowflakeConn, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def save_connection(conn: SnowflakeConn, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
     """Save Snowflake connection after successful test"""
     # Test connection before saving
     test_connection(conn.account, conn.username, conn.password, conn.warehouse)
@@ -113,6 +117,7 @@ def save_connection(conn: SnowflakeConn, current_user: User = Depends(get_curren
     ).first()
     
     if existing_conn:
+        logger.warning("/snowflake/save-connection - name exists %s", conn.connection_name)
         raise HTTPException(status_code=400, detail="Connection name already exists for this organization")
 
     new_connection = SnowflakeConnection(
@@ -130,28 +135,32 @@ def save_connection(conn: SnowflakeConn, current_user: User = Depends(get_curren
         db.add(new_connection)
         db.commit()
         db.refresh(new_connection)
+        logger.info("/snowflake/save-connection - saved id=%s", new_connection.id)
         return new_connection
     except IntegrityError:
         db.rollback()
+        logger.exception("/snowflake/save-connection - failed to save connection")
         raise HTTPException(status_code=400, detail="Failed to save connection")
 
 
 @router.get("/connections", response_model=List[ConnectionResponse])
-def list_connections(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def list_connections(current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
     """List all Snowflake connections for the organization"""
     connections = db.query(SnowflakeConnection).filter(
         SnowflakeConnection.org_id == current_user.org_id,
         SnowflakeConnection.is_active == True
     ).all()
+    logger.debug("/snowflake/connections - list count=%d", len(connections))
     return connections
 
 
 @router.get("/fetch-databases/{connection_id}")
-def fetch_databases(connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def fetch_databases(connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
     """Fetch all databases from Snowflake connection"""
     try:
         conn_uuid = uuid.UUID(connection_id)
     except ValueError:
+        logger.warning("/snowflake/fetch-databases - invalid id %s", connection_id)
         raise HTTPException(status_code=400, detail="Invalid connection ID format")
 
     # Get connection details
@@ -162,6 +171,7 @@ def fetch_databases(connection_id: str, current_user: User = Depends(get_current
     ).first()
     
     if not connection:
+        logger.warning("/snowflake/fetch-databases - connection not found %s", conn_uuid)
         raise HTTPException(status_code=404, detail="Snowflake connection not found")
 
     try:
@@ -194,18 +204,21 @@ def fetch_databases(connection_id: str, current_user: User = Depends(get_current
                 db.add(new_db)
         
         db.commit()
+        logger.info("/snowflake/fetch-databases - fetched %d databases", len(databases))
         return {"databases": databases}
         
     except Exception as e:
+        logger.exception("/snowflake/fetch-databases - error: %s", str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/fetch-schemas/{connection_id}/{database_name}")
-def fetch_schemas(connection_id: str, database_name: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def fetch_schemas(connection_id: str, database_name: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
     """Fetch schemas for a specific database"""
     try:
         conn_uuid = uuid.UUID(connection_id)
     except ValueError:
+        logger.warning("/snowflake/fetch-schemas - invalid id %s", connection_id)
         raise HTTPException(status_code=400, detail="Invalid connection ID format")
 
     # Get connection details
@@ -216,6 +229,7 @@ def fetch_schemas(connection_id: str, database_name: str, current_user: User = D
     ).first()
     
     if not connection:
+        logger.warning("/snowflake/fetch-schemas - connection not found %s", conn_uuid)
         raise HTTPException(status_code=404, detail="Snowflake connection not found")
 
     try:
@@ -263,18 +277,21 @@ def fetch_schemas(connection_id: str, database_name: str, current_user: User = D
                 db.add(new_schema)
         
         db.commit()
+        logger.info("/snowflake/fetch-schemas - fetched %d schemas for %s", len(schemas), database_name)
         return {"schemas": schemas}
         
     except Exception as e:
+        logger.exception("/snowflake/fetch-schemas - error: %s", str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/save-database-selection")
-def save_database_selection(selection: DatabaseSelection, connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def save_database_selection(selection: DatabaseSelection, connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
     """Save database selections for a connection"""
     try:
         conn_uuid = uuid.UUID(connection_id)
     except ValueError:
+        logger.warning("/snowflake/save-database-selection - invalid id %s", connection_id)
         raise HTTPException(status_code=400, detail="Invalid connection ID format")
 
     # Verify connection belongs to user's org
@@ -285,6 +302,7 @@ def save_database_selection(selection: DatabaseSelection, connection_id: str, cu
     ).first()
     
     if not connection:
+        logger.warning("/snowflake/save-database-selection - connection not found %s", conn_uuid)
         raise HTTPException(status_code=404, detail="Snowflake connection not found")
 
     # Update database selections
@@ -296,15 +314,17 @@ def save_database_selection(selection: DatabaseSelection, connection_id: str, cu
         database_row.is_selected = database_row.database_name in selection.database_names
     
     db.commit()
+    logger.info("/snowflake/save-database-selection - saved selections count=%d", len(selection.database_names))
     return {"message": "Database selections saved"}
 
 
 @router.post("/save-schema-selection")
-def save_schema_selection(selection: SchemaSelection, connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def save_schema_selection(selection: SchemaSelection, connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
     """Save schema selections for a specific database"""
     try:
         conn_uuid = uuid.UUID(connection_id)
     except ValueError:
+        logger.warning("/snowflake/save-schema-selection - invalid id %s", connection_id)
         raise HTTPException(status_code=400, detail="Invalid connection ID format")
 
     # Verify connection belongs to user's org
@@ -315,6 +335,7 @@ def save_schema_selection(selection: SchemaSelection, connection_id: str, curren
     ).first()
     
     if not connection:
+        logger.warning("/snowflake/save-schema-selection - connection not found %s", conn_uuid)
         raise HTTPException(status_code=404, detail="Snowflake connection not found")
 
     # Get database
@@ -324,6 +345,7 @@ def save_schema_selection(selection: SchemaSelection, connection_id: str, curren
     ).first()
     
     if not database:
+        logger.warning("/snowflake/save-schema-selection - database not found %s", selection.database_name)
         raise HTTPException(status_code=404, detail="Database not found")
 
     # Update schema selections
@@ -335,15 +357,17 @@ def save_schema_selection(selection: SchemaSelection, connection_id: str, curren
         schema.is_selected = schema.schema_name in selection.schema_names
     
     db.commit()
+    logger.info("/snowflake/save-schema-selection - saved %d schemas for %s", len(selection.schema_names), selection.database_name)
     return {"message": "Schema selections saved"}
 
 
 @router.get("/selected-databases/{connection_id}", response_model=List[DatabaseResponse])
-def get_selected_databases(connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_selected_databases(connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
     """Get selected databases for a connection"""
     try:
         conn_uuid = uuid.UUID(connection_id)
     except ValueError:
+        logger.warning("/snowflake/selected-databases - invalid id %s", connection_id)
         raise HTTPException(status_code=400, detail="Invalid connection ID format")
 
     # Verify connection belongs to user's org
@@ -354,6 +378,7 @@ def get_selected_databases(connection_id: str, current_user: User = Depends(get_
     ).first()
     
     if not connection:
+        logger.warning("/snowflake/selected-databases - connection not found %s", conn_uuid)
         raise HTTPException(status_code=404, detail="Snowflake connection not found")
 
     selected_databases = db.query(SnowflakeDatabase).filter(
@@ -361,15 +386,17 @@ def get_selected_databases(connection_id: str, current_user: User = Depends(get_
         SnowflakeDatabase.is_selected == True
     ).all()
     
+    logger.debug("/snowflake/selected-databases - count=%d", len(selected_databases))
     return selected_databases
 
 
 @router.get("/selected-schemas/{connection_id}/{database_name}", response_model=List[SchemaResponse])
-def get_selected_schemas(connection_id: str, database_name: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_selected_schemas(connection_id: str, database_name: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
     """Get selected schemas for a specific database"""
     try:
         conn_uuid = uuid.UUID(connection_id)
     except ValueError:
+        logger.warning("/snowflake/selected-schemas - invalid id %s", connection_id)
         raise HTTPException(status_code=400, detail="Invalid connection ID format")
 
     # Verify connection belongs to user's org
@@ -380,6 +407,7 @@ def get_selected_schemas(connection_id: str, database_name: str, current_user: U
     ).first()
     
     if not connection:
+        logger.warning("/snowflake/selected-schemas - connection not found %s", conn_uuid)
         raise HTTPException(status_code=404, detail="Snowflake connection not found")
 
     # Get database
@@ -389,6 +417,7 @@ def get_selected_schemas(connection_id: str, database_name: str, current_user: U
     ).first()
     
     if not database:
+        logger.warning("/snowflake/selected-schemas - database not found %s", database_name)
         raise HTTPException(status_code=404, detail="Database not found")
 
     selected_schemas = db.query(SnowflakeSchema).filter(
@@ -396,4 +425,5 @@ def get_selected_schemas(connection_id: str, database_name: str, current_user: U
         SnowflakeSchema.is_selected == True
     ).all()
     
+    logger.debug("/snowflake/selected-schemas - count=%d", len(selected_schemas))
     return selected_schemas

@@ -5,7 +5,7 @@
 # PUT /organizations/{org_id} → update organization
 # DELETE /organizations/{org_id} → deactivate organization
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List
@@ -15,8 +15,10 @@ from app.utils.models import Organization
 import uuid
 from uuid import UUID
 from datetime import datetime
+import logging
 
 router = APIRouter(prefix="/organizations", tags=["Organizations"])
+logger = logging.getLogger("organizations")
 
 
 # --- Models ---
@@ -40,11 +42,12 @@ class OrganizationResponse(BaseModel):
 
 # --- Endpoints ---
 @router.post("/", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
-def create_organization(org: OrganizationCreate, db: Session = Depends(get_db)):
+def create_organization(org: OrganizationCreate, db: Session = Depends(get_db), request: Request = None):
     """Create a new organization (Admin only)"""
     # Check if organization name already exists
     existing_org = db.query(Organization).filter(Organization.name == org.name).first()
     if existing_org:
+        logger.warning("/organizations - create: name exists %s", org.name)
         raise HTTPException(status_code=400, detail="Organization name already exists")
 
     new_org = Organization(name=org.name)
@@ -53,40 +56,46 @@ def create_organization(org: OrganizationCreate, db: Session = Depends(get_db)):
         db.add(new_org)
         db.commit()
         db.refresh(new_org)
+        logger.info("/organizations - created id=%s name=%s", new_org.id, new_org.name)
         return new_org
     except IntegrityError:
         db.rollback()
+        logger.exception("/organizations - create failed")
         raise HTTPException(status_code=400, detail="Failed to create organization")
 
 
 @router.get("/", response_model=List[OrganizationResponse])
-def list_organizations(db: Session = Depends(get_db)):
+def list_organizations(db: Session = Depends(get_db), request: Request = None):
     """List all organizations (Admin only)"""
     organizations = db.query(Organization).all()
+    logger.debug("/organizations - list count=%d", len(organizations))
     return organizations
 
 
 @router.get("/{org_id}", response_model=OrganizationResponse)
-def get_organization(org_id: str, db: Session = Depends(get_db)):
+def get_organization(org_id: str, db: Session = Depends(get_db), request: Request = None):
     """Get organization details by ID (Admin only)"""
     try:
         org_uuid = uuid.UUID(org_id)
     except ValueError:
+        logger.warning("/organizations - get: invalid id %s", org_id)
         raise HTTPException(status_code=400, detail="Invalid organization ID format")
 
     organization = db.query(Organization).filter(Organization.id == org_uuid).first()
     if not organization:
+        logger.warning("/organizations - get: not found %s", org_uuid)
         raise HTTPException(status_code=404, detail="Organization not found")
     
     return organization
 
 
 @router.put("/{org_id}", response_model=OrganizationResponse)
-def update_organization(org_id: str, org_update: OrganizationUpdate, db: Session = Depends(get_db)):
+def update_organization(org_id: str, org_update: OrganizationUpdate, db: Session = Depends(get_db), request: Request = None):
     """Update organization details (Admin only)"""
     try:
         org_uuid = uuid.UUID(org_id)
     except ValueError:
+        logger.warning("/organizations - update: invalid id %s", org_id)
         raise HTTPException(status_code=400, detail="Invalid organization ID format")
 
     organization = db.query(Organization).filter(Organization.id == org_uuid).first()
@@ -101,6 +110,7 @@ def update_organization(org_id: str, org_update: OrganizationUpdate, db: Session
             Organization.id != org_uuid
         ).first()
         if existing_org:
+            logger.warning("/organizations - update: name exists %s", org_update.name)
             raise HTTPException(status_code=400, detail="Organization name already exists")
         organization.name = org_update.name
 
@@ -110,18 +120,21 @@ def update_organization(org_id: str, org_update: OrganizationUpdate, db: Session
     try:
         db.commit()
         db.refresh(organization)
+        logger.info("/organizations - updated id=%s", organization.id)
         return organization
     except IntegrityError:
         db.rollback()
+        logger.exception("/organizations - update failed")
         raise HTTPException(status_code=400, detail="Failed to update organization")
 
 
 @router.delete("/{org_id}")
-def deactivate_organization(org_id: str, db: Session = Depends(get_db)):
+def deactivate_organization(org_id: str, db: Session = Depends(get_db), request: Request = None):
     """Deactivate organization (Admin only) - Soft delete"""
     try:
         org_uuid = uuid.UUID(org_id)
     except ValueError:
+        logger.warning("/organizations - delete: invalid id %s", org_id)
         raise HTTPException(status_code=400, detail="Invalid organization ID format")
 
     organization = db.query(Organization).filter(Organization.id == org_uuid).first()
@@ -132,7 +145,9 @@ def deactivate_organization(org_id: str, db: Session = Depends(get_db)):
     
     try:
         db.commit()
+        logger.info("/organizations - deactivated id=%s", organization.id)
         return {"message": "Organization deactivated successfully"}
     except IntegrityError:
         db.rollback()
+        logger.exception("/organizations - deactivate failed")
         raise HTTPException(status_code=400, detail="Failed to deactivate organization")

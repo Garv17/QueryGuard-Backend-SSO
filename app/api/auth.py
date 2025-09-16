@@ -5,7 +5,7 @@
 # POST /auth/logout → revoke JWT
 # GET /auth/me → get current user info
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from uuid import UUID
@@ -19,8 +19,10 @@ import hashlib
 import uuid
 import os
 import random
+import logging
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+logger = logging.getLogger("auth")
 
 # --- Config ---
 SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey") 
@@ -109,11 +111,13 @@ def get_current_user(
 
 # --- Endpoints ---
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
-def signup(user: UserSignup, db: Session = Depends(get_db)):
+def signup(user: UserSignup, db: Session = Depends(get_db), request: Request = None):
+    logger.info("POST /auth/signup - attempt for username=%s org_id=%s ip=%s", user.username, user.org_id, request.client.host if request and request.client else "unknown")
     # Validate org_id format
     try:
         org_uuid = uuid.UUID(user.org_id)
     except ValueError:
+        logger.warning("/auth/signup - invalid org_id format: %s", user.org_id)
         raise HTTPException(status_code=400, detail="Invalid organization ID format")
     
     # Check if organization exists and is active
@@ -122,16 +126,19 @@ def signup(user: UserSignup, db: Session = Depends(get_db)):
         Organization.is_active == True
     ).first()
     if not organization:
+        logger.warning("/auth/signup - org not found or inactive: %s", org_uuid)
         raise HTTPException(status_code=400, detail="Invalid organization ID or organization is inactive")
     
     # Check if username already exists
     existing_user = db.query(User).filter(User.username == user.username).first()
     if existing_user:
+        logger.warning("/auth/signup - username exists: %s", user.username)
         raise HTTPException(status_code=400, detail="Username already exists")
     
     # Check if email already exists
     existing_email = db.query(User).filter(User.email == user.email).first()
     if existing_email:
+        logger.warning("/auth/signup - email exists: %s", user.email)
         raise HTTPException(status_code=400, detail="Email already exists")
 
     new_user = User(
@@ -145,20 +152,24 @@ def signup(user: UserSignup, db: Session = Depends(get_db)):
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
+        logger.info("/auth/signup - user created id=%s", new_user.id)
         return {"message": "User registered successfully"}
     except IntegrityError:
         db.rollback()
+        logger.exception("/auth/signup - registration failed due to IntegrityError")
         raise HTTPException(status_code=400, detail="Registration failed")
 
 
 @router.post("/login")
-def login(user: UserLogin, db: Session = Depends(get_db)):
+def login(user: UserLogin, db: Session = Depends(get_db), request: Request = None):
+    logger.info("POST /auth/login - attempt username=%s ip=%s", user.username, request.client.host if request and request.client else "unknown")
     db_user = db.query(User).filter(
         User.username == user.username,
         User.is_active == True
     ).first()
     
     if not db_user or db_user.password_hash != hash_password(user.password):
+        logger.warning("/auth/login - invalid credentials for %s", user.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -176,14 +187,16 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     
     db.add(token_record)
     db.commit()
-    
+    logger.info("/auth/login - token issued for user_id=%s", db_user.id)
     return {"access_token": token, "token_type": "bearer"}
 
 
 @router.post("/forgot-password")
-def forgot_password(req: ForgotPassword, db: Session = Depends(get_db)):
+def forgot_password(req: ForgotPassword, db: Session = Depends(get_db), request: Request = None):
+    logger.info("POST /auth/forgot-password - email=%s ip=%s", req.email, request.client.host if request and request.client else "unknown")
     user = db.query(User).filter(User.email == req.email, User.is_active == True).first()
     if not user:
+        logger.warning("/auth/forgot-password - email not found: %s", req.email)
         raise HTTPException(status_code=404, detail="Email not found")
 
     # Generate 6-digit OTP
@@ -196,6 +209,7 @@ def forgot_password(req: ForgotPassword, db: Session = Depends(get_db)):
     # TODO: Send email with OTP
     # In production, implement email sending here
     # For now, return OTP in response (remove this in production)
+    logger.info("/auth/forgot-password - OTP generated for user_id=%s", user.id)
     return {
         "message": "Password reset OTP generated and sent to email",
         "otp": otp,  # Remove this in production
@@ -204,7 +218,8 @@ def forgot_password(req: ForgotPassword, db: Session = Depends(get_db)):
 
 
 @router.post("/reset-password")
-def reset_password(req: ResetPassword, db: Session = Depends(get_db)):
+def reset_password(req: ResetPassword, db: Session = Depends(get_db), request: Request = None):
+    logger.info("POST /auth/reset-password - email=%s ip=%s", req.email, request.client.host if request and request.client else "unknown")
     user = db.query(User).filter(
         User.email == req.email,
         User.password_reset_otp == req.otp,
@@ -213,6 +228,7 @@ def reset_password(req: ResetPassword, db: Session = Depends(get_db)):
     ).first()
     
     if not user:
+        logger.warning("/auth/reset-password - invalid/expired OTP for email=%s", req.email)
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
     user.password_hash = hash_password(req.new_password)
@@ -223,11 +239,13 @@ def reset_password(req: ResetPassword, db: Session = Depends(get_db)):
     db.query(UserToken).filter(UserToken.user_id == user.id).update({"is_revoked": True})
     
     db.commit()
+    logger.info("/auth/reset-password - password reset for user_id=%s", user.id)
     return {"message": "Password reset successful"}
 
 
 @router.post("/logout")
-def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
+    logger.info("POST /auth/logout - user_id=%s ip=%s", current_user.id, request.client.host if request and request.client else "unknown")
     # Get the token from the request
     # Note: We need to get the raw token to revoke it
     # This is a simplified approach - in production you might want to pass the token explicitly
@@ -236,9 +254,11 @@ def logout(current_user: User = Depends(get_current_user), db: Session = Depends
     db.query(UserToken).filter(UserToken.user_id == current_user.id).update({"is_revoked": True})
     db.commit()
     
+    logger.info("/auth/logout - tokens revoked for user_id=%s", current_user.id)
     return {"message": "Logged out successfully"}
 
 
 @router.get("/me", response_model=UserResponse)
-def me(current_user: User = Depends(get_current_user)):
+def me(current_user: User = Depends(get_current_user), request: Request = None):
+    logger.debug("GET /auth/me - user_id=%s ip=%s", current_user.id, request.client.host if request and request.client else "unknown")
     return current_user

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
@@ -20,8 +21,10 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from dotenv import load_dotenv
 load_dotenv()
+logger = logging.getLogger("database")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+logger.info("Loading DATABASE_URL and configuring SQLAlchemy engine")
 
 # Normalize driver to psycopg (v3) to avoid psycopg2 build issues on some platforms
 if DATABASE_URL and DATABASE_URL.startswith("postgresql+psycopg2://"):
@@ -41,7 +44,9 @@ class Base(DeclarativeBase):
 def init_db() -> None:
     # Import models to register metadata before create_all
     from .utils import models  # noqa: F401
+    logger.info("Creating database tables if not exist")
     Base.metadata.create_all(bind=engine)
+    logger.info("Database tables ensured")
 
 
 # Dependency for FastAPI routes
@@ -49,8 +54,10 @@ from typing import Generator
 
 def get_db() -> Generator:
     db = SessionLocal()
+    logger.debug("DB session opened")
     try:
         yield db
     finally:
         db.close()
+        logger.debug("DB session closed")
 

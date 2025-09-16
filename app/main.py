@@ -1,7 +1,16 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db
 from app.api import auth, organizations, snowflake, github, jira
+import logging
+import sys
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger("app")
 
 app = FastAPI(
     title="QueryGuardAI Backend",
@@ -28,12 +37,16 @@ app.include_router(jira.router)
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup"""
+    logger.info("Application startup: initializing database")
     init_db()
+    logger.info("Database initialized")
 
 @app.get("/")
-async def root():
+async def root(request: Request):
+    logger.info("GET / - Root endpoint called from %s", request.client.host if request.client else "unknown")
     return {"message": "QueryGuardAI Backend API", "version": "1.0.0"}
 
 @app.get("/health")
-async def health_check():
+async def health_check(request: Request):
+    logger.debug("GET /health - Health check from %s", request.client.host if request.client else "unknown")
     return {"status": "healthy"}
