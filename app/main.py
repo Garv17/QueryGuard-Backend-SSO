@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db
-from app.api import auth, organizations, snowflake, github, jira
+from app.api import auth, organizations, snowflake, github, jira, impact
 import logging
 import sys
 
@@ -33,6 +33,7 @@ app.include_router(organizations.router)
 app.include_router(snowflake.router)
 app.include_router(github.router)
 app.include_router(jira.router)
+app.include_router(impact.router)
 
 @app.on_event("startup")
 async def startup_event():

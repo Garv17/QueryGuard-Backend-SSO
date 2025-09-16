@@ -23,6 +23,8 @@ from datetime import datetime
 import os
 import logging
 from urllib.parse import unquote
+from app.services.impact_analysis import schema_detection_rag, dbt_model_detection_rag, fetch_queries, store_analysis_result
+from github import GithubIntegration, Github
 
 router = APIRouter(prefix="/github", tags=["GitHub"])
 
@@ -32,6 +34,8 @@ GITHUB_APP_URL = "https://github.com/apps/queryguardai-poc"
 CALLBACK_URL = "https://queryguard-backend-dev.onrender.com/github/callback"
 GITHUB_API_BASE = "https://api.github.com"
 WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "")
+GITHUB_APP_ID = os.getenv("APP_ID")
+PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 
 logger = logging.getLogger("github")
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +50,13 @@ GITHUB_PERMISSIONS = {
 GITHUB_EVENTS = [
     "pull_request"
 ]
+git_integration: Optional[GithubIntegration] = None
+if GITHUB_APP_ID and PRIVATE_KEY:
+    try:
+        git_integration = GithubIntegration(int(GITHUB_APP_ID), PRIVATE_KEY)
+    except Exception:
+        git_integration = None
+
 
 
 # --- Models ---
@@ -353,7 +364,7 @@ def deactivate_installation(installation_id: str, current_user: User = Depends(g
 
 
 @router.post("/webhook")
-async def github_webhook(request: Request):
+async def github_webhook(request: Request, db=Depends(get_db)):
     """Handle GitHub webhook events (PR events)"""
     # Get the raw body for signature verification
     body = await request.body()
@@ -384,7 +395,7 @@ async def github_webhook(request: Request):
     
     # Extract PR information
     action = payload.get("action")
-    if action not in ["opened", "reopened"]:
+    if action not in ["opened", "reopened", "synchronize"]:
         logger.info("/github/webhook - ignoring PR action %s", action)
         return {"message": f"Ignoring PR {action} action"}
     
@@ -398,18 +409,115 @@ async def github_webhook(request: Request):
     pr_body = pr_data.get("body")
     repo_full_name = repo_data.get("full_name")
     installation_id = str(installation_data.get("id"))
+
+    # Validate installation id exists and is active in our DB
+    if not installation_id:
+        logger.info("/github/webhook - missing installation id in payload")
+        return {"message": "Missing installation id"}
+
+    installation = db.query(GitHubInstallation).filter(
+        GitHubInstallation.installation_id == installation_id,
+        GitHubInstallation.is_active == True
+    ).first()
+
+    if not installation:
+        logger.info("/github/webhook - installation id %s not registered/active, ignoring", installation_id)
+        return {"message": "Installation not recognized or inactive"}
     
-    # TODO: Store PR data in database for processing
-    # TODO: Trigger downstream analysis based on PR changes
-    
-    logger.info("/github/webhook - processed PR #%s on %s (installation %s)", pr_number, repo_full_name, installation_id)
-    return {
-        "message": "PR webhook processed",
-        "pr_number": pr_number,
-        "repo": repo_full_name,
-        "installation_id": installation_id,
-        "action": action
-    }
+    # Use GitHub App installation token and PyGithub to fetch files and post comment
+    if not git_integration:
+        logger.warning("/github/webhook - GitHub Integration not configured")
+        return {"message": "GitHub Integration not configured"}
+
+    try:
+        access_token = git_integration.get_access_token(int(installation_id)).token
+        gh = Github(login_or_token=access_token)
+        repo = gh.get_repo(repo_full_name)
+        pr = repo.get_pull(pr_number)
+
+        # Collect relevant SQL file changes
+        code_changes = []
+        for file in pr.get_files():
+            if getattr(file, "patch", None) and file.filename.lower().endswith(".sql"):
+                code_changes.append(
+                    {
+                        "filename": file.filename,
+                        "status": file.status,
+                        "patch": file.patch,
+                        "additions": file.additions,
+                        "deletions": file.deletions,
+                    }
+                )
+
+        if not code_changes:
+            logger.info("/github/webhook - no relevant SQL changes found")
+            return {"message": "No relevant SQL changes found"}
+
+        # Analyze each SQL change
+        results = []
+        for c in code_changes:
+            full_diff = (
+                f"File: {c['filename']} ({c['status']}) [+{c['additions']}/-{c['deletions']}]\n{c['patch']}"
+            )
+            if c["filename"].endswith(".sql") and "models/" in c["filename"]:
+                analysis_result = dbt_model_detection_rag(full_diff, c["filename"])  # DBT model path
+            else:
+                analysis_result = schema_detection_rag(full_diff)
+
+            regression_queries = fetch_queries(analysis_result.get("affected_query_ids", []))
+
+            results.append(
+                {
+                    "sql_change": full_diff,
+                    "impact_analysis": analysis_result.get("impact_report", ""),
+                    "affected_query_ids": analysis_result.get("affected_query_ids", []),
+                    "regression_queries": regression_queries,
+                    "source_metadata": analysis_result.get("source_metadata", []),
+                }
+            )
+
+        # Compose comment
+        file_summaries = []
+        for idx, r in enumerate(results, start=1):
+            file_info = code_changes[idx - 1]
+            file_summaries.append(
+                f"""
+<details>
+<summary>📂 **{file_info['filename']}** ({file_info['status']}) [+{file_info['additions']}/-{file_info['deletions']}]
+</summary>
+
+**Impact Report:**
+{r['impact_analysis']}
+
+**Affected Query IDs:** {', '.join(r['affected_query_ids']) if r['affected_query_ids'] else 'None'}
+
+</details>
+"""
+            )
+
+        comment_text = f"## 🤖 **Impact Analysis Summary**\n\nAnalyzed {len(results)} SQL file(s) for potential downstream impact.\n\n*Analysis generated at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC*\n\n---\n\n{chr(10).join(file_summaries)}"
+
+        # Store results
+        analysis_id = store_analysis_result(pr_number, repo_full_name, {"files": results})
+
+        issue = repo.get_issue(number=pr_number)
+        issue.create_comment(comment_text)
+
+        logger.info("/github/webhook - posted analysis comment to PR #%s", pr_number)
+
+        return {
+            "message": "PR webhook processed",
+            "pr_number": pr_number,
+            "repo": repo_full_name,
+            "installation_id": installation_id,
+            "action": action,
+            "files_analyzed": len(results),
+            "analysis_id": analysis_id,
+        }
+
+    except Exception as e:
+        logger.exception("/github/webhook - analysis failed: %s", str(e))
+        raise HTTPException(status_code=500, detail="Webhook processing failed")
 
 
 @router.post("/process-pr")
