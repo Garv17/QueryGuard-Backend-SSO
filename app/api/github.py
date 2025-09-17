@@ -35,7 +35,7 @@ CALLBACK_URL = "https://queryguard-backend-dev.onrender.com/github/callback"
 GITHUB_API_BASE = "https://api.github.com"
 WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "")
 GITHUB_APP_ID = os.getenv("APP_ID")
-PRIVATE_KEY = os.getenv("PRIVATE_KEY")
+PRIVATE_KEY = os.getenv("GITHUB_PRIVATE_KEY")
 
 logger = logging.getLogger("github")
 logging.basicConfig(level=logging.INFO)
@@ -460,9 +460,9 @@ async def github_webhook(request: Request, db=Depends(get_db)):
                 f"File: {c['filename']} ({c['status']}) [+{c['additions']}/-{c['deletions']}]\n{c['patch']}"
             )
             if c["filename"].endswith(".sql") and "models/" in c["filename"]:
-                analysis_result = dbt_model_detection_rag(full_diff, c["filename"])  # DBT model path
+                analysis_result = dbt_model_detection_rag(full_diff, c["filename"], str(installation.org_id))  # DBT model path
             else:
-                analysis_result = schema_detection_rag(full_diff)
+                analysis_result = schema_detection_rag(full_diff, str(installation.org_id))
 
             regression_queries = fetch_queries(analysis_result.get("affected_query_ids", []))
 

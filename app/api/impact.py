@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 from typing import Optional
 from app.services.impact_analysis import schema_detection_rag, dbt_model_detection_rag, fetch_queries
+from app.api.auth import get_current_user
+from app.utils.models import User
 
 
 router = APIRouter(prefix="/simulate", tags=["Impact Simulation"])
@@ -14,9 +16,9 @@ class ImpactRequest(BaseModel):
 
 
 @router.post("/schema_change_impact")
-async def simulate_schema_impact(req: ImpactRequest):
-    try:
-        res = schema_detection_rag(req.sql_change)
+async def simulate_schema_impact(req: ImpactRequest, current_user: User = Depends(get_current_user)):
+    # try:
+        res = schema_detection_rag(req.sql_change, str(current_user.org_id))
 
         impact_report = res.get("impact_report", "")
         affected_query_ids = res.get("affected_query_ids", [])
@@ -32,17 +34,17 @@ async def simulate_schema_impact(req: ImpactRequest):
             "source_metadata": source_metadata,
         }
 
-    except Exception:
-        raise HTTPException(status_code=500, detail="Impact analysis failed")
+    # except Exception:
+    #     raise HTTPException(status_code=500, detail="Impact analysis failed")
 
 
 @router.post("/dbt_model_change_impact")
-async def simulate_dbt_model_impact(req: ImpactRequest):
+async def simulate_dbt_model_impact(req: ImpactRequest, current_user: User = Depends(get_current_user)):
     try:
         if not req.file_path:
             raise HTTPException(status_code=400, detail="file_path is required for DBT model analysis")
 
-        res = dbt_model_detection_rag(req.sql_change, req.file_path)
+        res = dbt_model_detection_rag(req.sql_change, req.file_path, str(current_user.org_id))
 
         impact_report = res.get("impact_report", "")
         affected_query_ids = res.get("affected_query_ids", [])

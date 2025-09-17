@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional, Set
 from pydantic import BaseModel
 from langchain_community.document_loaders.csv_loader import CSVLoader
-from langchain.vectorstores import Chroma
+from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.schema import Document
 from langchain.chains import RetrievalQA
@@ -26,31 +26,71 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 embedding = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=GOOGLE_API_KEY)
-LLM = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=GOOGLE_API_KEY, temperature=0.2)
+LLM = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key="AIzaSyCH1yy4-gnm8Qd2v6LApavp3biw87fy-ZE", temperature=0.2)
+
+# # We are assuming that we have created a vector sotre 
+# def init_vector_store() -> Chroma:
+#     if os.path.exists(VECTOR_STORE_DIR):
+#         db = Chroma(persist_directory=VECTOR_STORE_DIR, embedding_function=embedding)
+#         logger.info("Loaded existing Chroma vector store")
+#     else:
+#         loader = CSVLoader(LINEAGE_CSV_PATH)
+#         docs = loader.load()
+#         db = Chroma.from_documents(docs, embedding, persist_directory=VECTOR_STORE_DIR)
+#         db.persist()
+#         logger.info("Created and persisted new Chroma vector store")
+#     return db
 
 
-def init_vector_store() -> Chroma:
-    if os.path.exists(VECTOR_STORE_DIR):
-        db = Chroma(persist_directory=VECTOR_STORE_DIR, embedding_function=embedding)
-        logger.info("Loaded existing Chroma vector store")
-    else:
-        loader = CSVLoader(LINEAGE_CSV_PATH)
-        docs = loader.load()
-        db = Chroma.from_documents(docs, embedding, persist_directory=VECTOR_STORE_DIR)
-        db.persist()
-        logger.info("Created and persisted new Chroma vector store")
+
+
+def get_org_vector_store(org_id: str) -> Chroma:
+    """
+    Returns a Chroma vector store bound to a specific org collection.
+    """
+    collection_name = f"org_{org_id}"
+    db = Chroma(
+        collection_name=collection_name,
+        persist_directory=VECTOR_STORE_DIR,
+        embedding_function=embedding,
+    )
     return db
 
 
-DB = init_vector_store()
-RETRIEVER = DB.as_retriever(search_kwargs={"k": 8})
+def init_org_vector_store(org_id: str, csv_path: str = None) -> Chroma:
+    """
+    Initialize or update an org-specific collection.
+    Optionally bootstrap with CSV data.
+    """
+    db = get_org_vector_store(org_id)
+
+    if csv_path:  # bootstrap docs into the org collection
+        loader = CSVLoader(csv_path)
+        docs = loader.load()
+        db.add_documents(docs)
+        db.persist()
+        print(f"Loaded {len(docs)} docs into collection for org {org_id}")
+
+    return db
 
 
-qa_chain = RetrievalQA.from_chain_type(
-    llm=LLM,
-    retriever=DB.as_retriever(search_kwargs={"k": 5}),
-    return_source_documents=True,
-)
+def get_retriever(org_id: str, k: int = 8):
+    db = get_org_vector_store(org_id)
+    return db.as_retriever(search_kwargs={"k": k})
+
+
+def get_qa_chain(org_id: str, k: int = 5):
+    retriever = get_retriever(org_id, k=k)
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=LLM,
+        retriever=retriever,
+        return_source_documents=True,
+    )
+    return qa_chain
+
+
+# Removed global, hardcoded retriever/qa_chain initialization.
+# Use get_retriever(org_id) and get_qa_chain(org_id) dynamically per request.
 
 
 def get_db_connection():
@@ -100,6 +140,9 @@ def store_analysis_result(pr_number: int, repo_name: str, result: Dict) -> str:
     return analysis_id
 
 
+# -----------------------------
+# Prompts for Schema changes
+# -----------------------------
 PLAN_PROMPT = """
 You are a metadata-aware lineage analyst. You will receive a SQL/schema change and a set of context snippets from a lineage knowledge base (CSV rows embedded in a vector store). 
 
@@ -123,7 +166,6 @@ Context Snippets (may be empty):
 Respond only with JSON text, do not include any extra explanation.
 """
 
-
 FINAL_REPORT_PROMPT = """
 You are a metadata-aware assistant tasked with generating a **complete multi-hop downstream impact analysis report**.
 
@@ -140,18 +182,18 @@ Your task:
 ---
 
 Your output must be valid JSON with these keys:
-{
+{{
   "impact_report": "<the full Markdown report, format attached below>",
   "affected_query_ids": ["q1", "q2", ...],
   "source_metadata": [
-    {
+    {{
       "target_database": "...",
       "target_schema": "...",
       "target_table": "...",
       "target_column": "..."
-    }
+    }}
   ]
-}
+}}
 
 ---
 
@@ -192,7 +234,7 @@ _List ALL impacted downstream targets grouped by depth._
 ---
 
 **Explanation:**
-- Describe clearly how the change propagates through ALL levels (up to the deepest retrieved). \
+- Describe clearly how the change propagates through ALL levels (up to the deepest retrieved). 
 - Mention necessary updates (views, ETL, dashboards, schema enforcement, SELECT * risks, etc.).
 
 ---
@@ -214,6 +256,9 @@ ALL Retrieved Snippets:
 """
 
 
+# -----------------------------
+# Prompts for DBT model changes
+# -----------------------------
 dbt_PLAN_PROMPT = """
 You are a metadata-aware lineage analyst. You will receive a json data, which explains change in dbt model logic and their impacted columns in target. 
 sample/example json data :
@@ -271,18 +316,18 @@ Your task:
 ---
 
 Your output must be valid JSON with these keys:
-{
+{{
   "impact_report": "<the full Markdown report, format attached below>",
   "affected_query_ids": ["q1", "q2", ...],
   "source_metadata": [
-    {
+    {{
       "target_database": "...",
       "target_schema": "...",
       "target_table": "...",
       "target_column": "..."
-    }
+    }}
   ]
-}
+}}
 
 ---
 
@@ -358,6 +403,7 @@ Impacted Columns: corporateservices, allocationtype, payrollbasis
 """
 
 
+
 def _docs_to_snippets(docs: List[Document]) -> str:
     return "\n".join(d.page_content.strip() for d in docs)
 
@@ -382,18 +428,19 @@ class IterativeConfig(BaseModel):
     dedupe: bool = True
 
 
-def schema_detection_rag(change_text: str, cfg: Optional[IterativeConfig] = None):
+def schema_detection_rag(change_text: str, org_id: str, cfg: Optional[IterativeConfig] = None):
     cfg = cfg or IterativeConfig()
     used_queries: List[str] = []
     collected_docs: List[Document] = []
     seen_texts: Set[str] = set()
     frontier: List[str] = [change_text]
+    retriever = get_retriever(org_id, k=cfg.k_per_query)
 
     for _ in range(cfg.max_iters):
         new_docs: List[Document] = []
         for q in frontier:
             used_queries.append(q)
-            docs = RETRIEVER.get_relevant_documents(q)
+            docs = retriever.get_relevant_documents(q)
             for d in docs:
                 if not cfg.dedupe or d.page_content not in seen_texts:
                     seen_texts.add(d.page_content)
@@ -417,7 +464,7 @@ def schema_detection_rag(change_text: str, cfg: Optional[IterativeConfig] = None
     return final_json_response
 
 
-def dbt_model_detection_rag(code_changes: str, file_path: str, cfg: Optional[IterativeConfig] = None):
+def dbt_model_detection_rag(code_changes: str, file_path: str, org_id: str, cfg: Optional[IterativeConfig] = None):
     # Placeholder for dbt_conn
     try:
         import dbt_connector_temp as dbt_conn  # type: ignore
@@ -458,7 +505,8 @@ def dbt_model_detection_rag(code_changes: str, file_path: str, cfg: Optional[Ite
         dbt model change {code_changes_inner}
         dbt model metadata {model_metadata}
         """
-        result = qa_chain.invoke({"query": query})
+        qa_chain_local = get_qa_chain(org_id, k=cfg.k_per_query) if cfg else get_qa_chain(org_id)
+        result = qa_chain_local.invoke({"query": query})
         safe_json = _safe_json_parse(result["result"]) if isinstance(result, dict) and "result" in result else {}
         impacted_columns = [col for impact in safe_json.get("impact", []) for col in impact.get("impacted_columns", [])]
         return {"safe_json": safe_json, "impacted_columns": impacted_columns}
@@ -472,12 +520,13 @@ def dbt_model_detection_rag(code_changes: str, file_path: str, cfg: Optional[Ite
     collected_docs: List[Document] = []
     seen_texts: Set[str] = set()
     frontier: List[str] = impact_columns
+    retriever = get_retriever(org_id, k=cfg.k_per_query)
 
     for _ in range(cfg.max_iters):
         new_docs: List[Document] = []
         for q in frontier:
             used_queries.append(q)
-            docs = RETRIEVER.get_relevant_documents(q)
+            docs = retriever.get_relevant_documents(q)
             for d in docs:
                 if not cfg.dedupe or d.page_content not in seen_texts:
                     seen_texts.add(d.page_content)
