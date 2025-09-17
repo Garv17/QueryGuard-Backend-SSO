@@ -22,6 +22,7 @@ from uuid import UUID
 from datetime import datetime
 import os
 import logging
+from urllib.parse import unquote
 
 router = APIRouter(prefix="/github", tags=["GitHub"])
 
@@ -183,6 +184,7 @@ def github_callback(
     installation_id: str,
     setup_action: str,
     state: Optional[str] = None,
+    code: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """Handle GitHub App installation callback"""
@@ -193,8 +195,12 @@ def github_callback(
         return {"message": "Installation ignored - no state parameter"}
     
     try:
+        # Decode and normalize state; GitHub may send it URL-encoded and with a leading '/'
+        normalized_state = unquote(state)
+        if normalized_state.startswith('/'):
+            normalized_state = normalized_state[1:]
         # Validate state (org_id) format
-        org_uuid = uuid.UUID(state)
+        org_uuid = uuid.UUID(normalized_state)
     except ValueError:
         logger.warning("/github/callback - invalid state format: %s", state)
         raise HTTPException(status_code=400, detail="Invalid state parameter")
