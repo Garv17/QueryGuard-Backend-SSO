@@ -492,19 +492,33 @@ async def github_webhook(request: Request, db=Depends(get_db)):
         logger.warning("/github/webhook - invalid signature")
         raise HTTPException(status_code=401, detail="Invalid signature")
     
-    # Get event type
+    # Extract headers and parse payload early so we can log for any event
     event_type = request.headers.get("X-GitHub-Event")
-    if event_type != "pull_request":
-        logger.info("/github/webhook - ignoring event %s", event_type)
-        return {"message": f"Ignoring {event_type} event"}
-    
+    delivery_id = request.headers.get("X-GitHub-Delivery")
+
     # Parse the webhook payload
     try:
         payload = json.loads(body.decode())
-        logger.info("/github/webhook - payload: %s", payload)
     except json.JSONDecodeError:
         logger.warning("/github/webhook - invalid JSON payload")
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    # Log compact info for observability
+    try:
+        payload_preview = str(payload)[:2000]
+        logger.info(
+            "/github/webhook - delivery=%s event=%s payload_preview=%s",
+            delivery_id,
+            event_type,
+            payload_preview,
+        )
+    except Exception:
+        logger.debug("/github/webhook - failed to log payload preview")
+
+    # If not interested in this event type, return early
+    if event_type != "pull_request":
+        logger.info("/github/webhook - ignoring event %s", event_type)
+        return {"message": f"Ignoring {event_type} event"}
     
     # Extract PR information
     action = payload.get("action")
