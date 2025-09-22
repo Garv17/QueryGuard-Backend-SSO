@@ -25,6 +25,7 @@ import logging
 from urllib.parse import unquote
 from app.services.impact_analysis import schema_detection_rag, dbt_model_detection_rag, fetch_queries, store_analysis_result
 from github import GithubIntegration, Github
+from sqlalchemy import and_
 
 router = APIRouter(prefix="/github", tags=["GitHub"])
 
@@ -194,7 +195,7 @@ def github_install(org_id: str, request: Request):
 @router.get("/callback")
 def github_callback(
     installation_id: str,
-    setup_action: str,
+    setup_action: Optional[str] = None,
     state: Optional[str] = None,
     code: Optional[str] = None,
     db: Session = Depends(get_db)
@@ -255,6 +256,58 @@ def github_callback(
         db.commit()
         db.refresh(new_installation)
         logger.info("/github/callback - installation saved id=%s org_id=%s", new_installation.id, org_uuid)
+
+        # Best-effort: immediately sync repositories for this installation
+        try:
+            if git_integration:
+                access_token = git_integration.get_access_token(int(installation_id)).token
+                headers = {
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/vnd.github.v3+json",
+                }
+                repos_resp = requests.get(f"{GITHUB_API_BASE}/installation/repositories", headers=headers)
+                if repos_resp.status_code == 200:
+                    repos_data = repos_resp.json().get("repositories", [])
+
+                    existing_repos = db.query(GitHubRepository).filter(
+                        GitHubRepository.installation_id == new_installation.id
+                    ).all()
+                    existing_by_repo_id = {r.repo_id: r for r in existing_repos}
+
+                    seen_repo_ids: set[str] = set()
+                    for r in repos_data:
+                        repo_id = str(r.get("id"))
+                        seen_repo_ids.add(repo_id)
+                        repo_obj = existing_by_repo_id.get(repo_id)
+                        if not repo_obj:
+                            repo_obj = GitHubRepository(
+                                installation_id=new_installation.id,
+                                repo_id=repo_id,
+                                repo_name=r.get("name") or "",
+                                full_name=r.get("full_name") or "",
+                                private=bool(r.get("private")),
+                                description=r.get("description"),
+                                default_branch=r.get("default_branch"),
+                            )
+                            db.add(repo_obj)
+                        else:
+                            repo_obj.repo_name = r.get("name") or repo_obj.repo_name
+                            repo_obj.full_name = r.get("full_name") or repo_obj.full_name
+                            repo_obj.private = bool(r.get("private"))
+                            repo_obj.description = r.get("description")
+                            repo_obj.default_branch = r.get("default_branch")
+
+                    db.commit()
+                else:
+                    logger.warning(
+                        "/github/callback - failed to fetch repositories for installation %s: %s",
+                        installation_id,
+                        repos_resp.text,
+                    )
+            else:
+                logger.info("/github/callback - GitHub Integration not configured; skipping repo sync")
+        except Exception:
+            logger.exception("/github/callback - error while syncing repositories for installation %s", installation_id)
         
         # Optional: redirect to your frontend success page if CALLBACK_URL is set
         if CALLBACK_URL:
@@ -324,19 +377,70 @@ def sync_repositories(installation_id: str, current_user: User = Depends(get_cur
     if not installation:
         raise HTTPException(status_code=404, detail="GitHub installation not found")
     
+    if not git_integration:
+        raise HTTPException(status_code=400, detail="GitHub Integration not configured")
+
     try:
-        # TODO: Implement actual GitHub API calls here
-        # This would require your GitHub App's JWT token and access token
-        
-        # For now, return a placeholder response
-        return {
-            "message": "Repository sync initiated",
-            "installation_id": installation_id,
-            "note": "GitHub API integration needs to be implemented with your App's credentials"
+        access_token = git_integration.get_access_token(int(installation.installation_id)).token
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/vnd.github.v3+json",
         }
-        
+
+        response = requests.get(f"{GITHUB_API_BASE}/installation/repositories", headers=headers)
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail=f"Failed to get repositories: {response.text}")
+
+        repos = response.json().get("repositories", [])
+
+        existing_repos = db.query(GitHubRepository).filter(
+            GitHubRepository.installation_id == installation.id
+        ).all()
+        existing_by_repo_id = {r.repo_id: r for r in existing_repos}
+
+        seen_repo_ids: set[str] = set()
+        created_count = 0
+        updated_count = 0
+
+        for r in repos:
+            repo_id = str(r.get("id"))
+            seen_repo_ids.add(repo_id)
+            repo_obj = existing_by_repo_id.get(repo_id)
+            if not repo_obj:
+                repo_obj = GitHubRepository(
+                    installation_id=installation.id,
+                    repo_id=repo_id,
+                    repo_name=r.get("name") or "",
+                    full_name=r.get("full_name") or "",
+                    private=bool(r.get("private")),
+                    description=r.get("description"),
+                    default_branch=r.get("default_branch"),
+                )
+                db.add(repo_obj)
+                created_count += 1
+            else:
+                repo_obj.repo_name = r.get("name") or repo_obj.repo_name
+                repo_obj.full_name = r.get("full_name") or repo_obj.full_name
+                repo_obj.private = bool(r.get("private"))
+                repo_obj.description = r.get("description")
+                repo_obj.default_branch = r.get("default_branch")
+                updated_count += 1
+
+        db.commit()
+
+        return {
+            "message": "Repository sync completed",
+            "installation_id": installation_id,
+            "created": created_count,
+            "updated": updated_count,
+            "total": len(repos),
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to sync repositories: {str(e)}")
+        logger.exception("/github/sync-repositories - error: %s", str(e))
+        raise HTTPException(status_code=500, detail="Failed to sync repositories")
 
 
 @router.delete("/installations/{installation_id}")
