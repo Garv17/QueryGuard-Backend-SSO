@@ -311,6 +311,14 @@ def github_callback(
         
         # Optional: redirect to your frontend success page if CALLBACK_URL is set
         if CALLBACK_URL:
+            # Avoid redirecting back to the same callback endpoint to prevent a second hit
+            if CALLBACK_URL.rstrip("/").endswith("/github/callback"):
+                return {
+                    "message": "GitHub installation saved",
+                    "org_id": str(org_uuid),
+                    "installation_id": installation_id,
+                    "status": "success",
+                }
             # Append org_id and installation_id for UI to consume
             redirect_url = f"{CALLBACK_URL}?org_id={org_uuid}&installation_id={installation_id}&status=success"
             return RedirectResponse(url=str(redirect_url))
