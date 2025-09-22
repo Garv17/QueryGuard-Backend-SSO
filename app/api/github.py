@@ -35,7 +35,7 @@ GITHUB_APP_URL = "https://github.com/apps/queryguardai-poc"
 CALLBACK_URL = "https://queryguard-backend-dev.onrender.com/github/callback"
 GITHUB_API_BASE = "https://api.github.com"
 WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "")
-GITHUB_APP_ID = os.getenv("APP_ID")
+GITHUB_APP_ID = os.getenv("GITHUB_APP_ID")
 PRIVATE_KEY = os.getenv("GITHUB_PRIVATE_KEY")
 
 logger = logging.getLogger("github")
@@ -501,6 +501,7 @@ async def github_webhook(request: Request, db=Depends(get_db)):
     # Parse the webhook payload
     try:
         payload = json.loads(body.decode())
+        logger.info("/github/webhook - payload: %s", payload)
     except json.JSONDecodeError:
         logger.warning("/github/webhook - invalid JSON payload")
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
