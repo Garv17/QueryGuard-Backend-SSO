@@ -18,6 +18,7 @@ class ImpactRequest(BaseModel):
 @router.post("/schema_change_impact")
 async def simulate_schema_impact(req: ImpactRequest, current_user: User = Depends(get_current_user)):
     # try:
+        print(str(current_user.org_id))
         res = schema_detection_rag(req.sql_change, str(current_user.org_id))
 
         impact_report = res.get("impact_report", "")

@@ -19,14 +19,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
-VECTOR_STORE_DIR = os.getenv("VECTOR_STORE_DIR", "chromadb_test_data")
-LINEAGE_CSV_PATH = os.getenv("LINEAGE_CSV_PATH", "lineage_output_deep.csv")
+VECTOR_STORE_DIR = os.getenv("VECTOR_STORE_DIR", "chroma_collection_setup")
+LINEAGE_CSV_PATH = os.getenv("LINEAGE_CSV_PATH", "temp_lineage_data/lineage_output_deep.csv")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 embedding = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=GOOGLE_API_KEY)
-LLM = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key="AIzaSyCH1yy4-gnm8Qd2v6LApavp3biw87fy-ZE", temperature=0.2)
+LLM = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=GOOGLE_API_KEY, temperature=0.2)
 
 # # We are assuming that we have created a vector sotre 
 # def init_vector_store() -> Chroma:
@@ -441,6 +441,18 @@ def schema_detection_rag(change_text: str, org_id: str, cfg: Optional[IterativeC
         for q in frontier:
             used_queries.append(q)
             docs = retriever.get_relevant_documents(q)
+            try:
+                logger.info(
+                    "lineage.retrieval - org=%s query_len=%d docs=%d",
+                    org_id,
+                    len(q or ""),
+                    len(docs or []),
+                )
+                for idx, d in enumerate(docs[:3]):
+                    preview = (d.page_content or "").strip().replace("\n", " ")[:300]
+                    logger.info("lineage.retrieval.preview[%d]: %s", idx, preview)
+            except Exception:
+                logger.debug("lineage.retrieval - logging failed for query preview")
             for d in docs:
                 if not cfg.dedupe or d.page_content not in seen_texts:
                     seen_texts.add(d.page_content)
@@ -527,6 +539,18 @@ def dbt_model_detection_rag(code_changes: str, file_path: str, org_id: str, cfg:
         for q in frontier:
             used_queries.append(q)
             docs = retriever.get_relevant_documents(q)
+            try:
+                logger.info(
+                    "dbt.retrieval - org=%s query_len=%d docs=%d",
+                    org_id,
+                    len(q or ""),
+                    len(docs or []),
+                )
+                for idx, d in enumerate(docs[:3]):
+                    preview = (d.page_content or "").strip().replace("\n", " ")[:300]
+                    logger.info("dbt.retrieval.preview[%d]: %s", idx, preview)
+            except Exception:
+                logger.debug("dbt.retrieval - logging failed for query preview")
             for d in docs:
                 if not cfg.dedupe or d.page_content not in seen_texts:
                     seen_texts.add(d.page_content)
