@@ -105,7 +105,7 @@ def fetch_queries(query_ids: List[str]) -> List[Dict]:
         placeholders = ",".join(["%s"] * len(query_ids))
         cursor.execute(
             f"""
-            SELECT query_id, query_text FROM "QUERY_ACCESS_HISTORY"
+            SELECT query_id, query_text FROM "QUERY_ACCESS_HISTORY_DEEP"
             WHERE query_id IN ({placeholders})
         """,
             query_ids,
