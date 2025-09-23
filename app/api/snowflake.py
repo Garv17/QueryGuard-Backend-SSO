@@ -11,7 +11,7 @@ from typing import List
 from pydantic import BaseModel
 import snowflake.connector
 from app.database import get_db
-from app.utils.models import SnowflakeConnection, SnowflakeDatabase, SnowflakeSchema, User
+from app.utils.models import SnowflakeConnection, SnowflakeDatabase, SnowflakeSchema, User, SnowflakeJob
 from app.api.auth import get_current_user
 import uuid
 from uuid import UUID
@@ -135,6 +135,20 @@ def save_connection(conn: SnowflakeConn, current_user: User = Depends(get_curren
         db.add(new_connection)
         db.commit()
         db.refresh(new_connection)
+        # Ensure/create job row for this connection if cron is provided
+        if conn.cron_expression:
+            existing_job = db.query(SnowflakeJob).filter(SnowflakeJob.connection_id == new_connection.id).first()
+            if existing_job:
+                existing_job.cron_expression = conn.cron_expression
+                existing_job.is_active = True
+            else:
+                db.add(SnowflakeJob(
+                    connection_id=new_connection.id,
+                    cron_expression=conn.cron_expression,
+                    last_run_time=None,
+                    is_active=True
+                ))
+            db.commit()
         logger.info("/snowflake/save-connection - saved id=%s", new_connection.id)
         return new_connection
     except IntegrityError:

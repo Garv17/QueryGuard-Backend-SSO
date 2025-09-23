@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db
+from app.snowflake_crawler import polling_worker
+import threading
 from app.api import auth, organizations, snowflake, github, jira
 import logging
 import sys
@@ -40,6 +42,10 @@ async def startup_event():
     logger.info("Application startup: initializing database")
     init_db()
     logger.info("Database initialized")
+    # Start background polling worker
+    app.state.worker_stop_event = threading.Event()
+    app.state.worker_thread = threading.Thread(target=polling_worker, args=(app.state.worker_stop_event,), daemon=True)
+    app.state.worker_thread.start()
 
 @app.get("/")
 async def root(request: Request):
