@@ -7,8 +7,8 @@
 from fastapi import APIRouter, HTTPException, Depends, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from typing import List
-from pydantic import BaseModel
+from typing import List, Optional
+from pydantic import BaseModel, validator
 import snowflake.connector
 from app.database import get_db
 from app.utils.models import SnowflakeConnection, SnowflakeDatabase, SnowflakeSchema, User, SnowflakeJob
@@ -17,12 +17,26 @@ import uuid
 from uuid import UUID
 from datetime import datetime
 import logging
+from croniter import croniter
 
 router = APIRouter(prefix="/snowflake", tags=["Snowflake"])
 logger = logging.getLogger("snowflake")
 
 
 # --- Helpers ---
+def validate_cron_expression(cron_expr: Optional[str]) -> bool:
+    """Validate cron expression using croniter library"""
+    if not cron_expr or cron_expr.strip() == "":
+        return True  # Empty cron expression is valid (no scheduling)
+    
+    try:
+        # Test if the cron expression is valid by trying to get next run time
+        croniter(cron_expr.strip())
+        return True
+    except Exception as e:
+        logger.warning("Invalid cron expression '%s': %s", cron_expr, str(e))
+        return False
+
 def test_connection(account, username, password, warehouse=None, database=None, schema=None):
     try:
         conn = snowflake.connector.connect(
@@ -49,7 +63,15 @@ class SnowflakeConn(BaseModel):
     password: str
     warehouse: str = None
     role: str = None
-    cron_expression: str = None
+    cron_expression: Optional[str] = None
+    
+    @validator('cron_expression')
+    def validate_cron_expression(cls, v):
+        """Validate cron expression if provided"""
+        if v is not None and v.strip() != "":
+            if not validate_cron_expression(v):
+                raise ValueError(f"Invalid cron expression: '{v}'. Please use standard cron format (e.g., '0 */6 * * *' for every 6 hours)")
+        return v.strip() if v else None
 
 class DatabaseSelection(BaseModel):
     database_names: List[str]
@@ -109,6 +131,15 @@ def save_connection(conn: SnowflakeConn, current_user: User = Depends(get_curren
     # Test connection before saving
     test_connection(conn.account, conn.username, conn.password, conn.warehouse)
 
+    # Validate cron expression if provided
+    if conn.cron_expression and conn.cron_expression.strip():
+        if not validate_cron_expression(conn.cron_expression):
+            logger.warning("/snowflake/save-connection - invalid cron expression: %s", conn.cron_expression)
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid cron expression: '{conn.cron_expression}'. Please use standard cron format (e.g., '0 */6 * * *' for every 6 hours)"
+            )
+
     # Check if connection name already exists for this org
     existing_conn = db.query(SnowflakeConnection).filter(
         SnowflakeConnection.org_id == current_user.org_id,
@@ -135,8 +166,10 @@ def save_connection(conn: SnowflakeConn, current_user: User = Depends(get_curren
         db.add(new_connection)
         db.commit()
         db.refresh(new_connection)
-        # Ensure/create job row for this connection if cron is provided
-        if conn.cron_expression:
+        
+        # Handle job creation/update based on cron expression
+        if conn.cron_expression and conn.cron_expression.strip():
+            # Create or update job for scheduled crawling
             existing_job = db.query(SnowflakeJob).filter(SnowflakeJob.connection_id == new_connection.id).first()
             if existing_job:
                 existing_job.cron_expression = conn.cron_expression
@@ -149,6 +182,15 @@ def save_connection(conn: SnowflakeConn, current_user: User = Depends(get_curren
                     is_active=True
                 ))
             db.commit()
+            logger.info("/snowflake/save-connection - created/updated job with cron: %s", conn.cron_expression)
+        else:
+            # Deactivate any existing job if cron expression is empty
+            existing_job = db.query(SnowflakeJob).filter(SnowflakeJob.connection_id == new_connection.id).first()
+            if existing_job:
+                existing_job.is_active = False
+                db.commit()
+                logger.info("/snowflake/save-connection - deactivated job (no cron expression)")
+        
         logger.info("/snowflake/save-connection - saved id=%s", new_connection.id)
         return new_connection
     except IntegrityError:

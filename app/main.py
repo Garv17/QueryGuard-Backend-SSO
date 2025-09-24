@@ -31,6 +31,7 @@ def sync_jobs_with_connections():
         
         jobs_created = 0
         jobs_updated = 0
+        jobs_deactivated = 0
         
         for connection in connections_with_cron:
             # Check if job already exists for this connection
@@ -57,11 +58,32 @@ def sync_jobs_with_connections():
                 jobs_created += 1
                 logger.info("➕ Created job for connection: %s", connection.connection_name)
         
+        # Handle connections with empty cron expressions - deactivate their jobs
+        connections_without_cron = db.query(SnowflakeConnection).filter(
+            SnowflakeConnection.is_active == True,
+            db.or_(
+                SnowflakeConnection.cron_expression.is_(None),
+                SnowflakeConnection.cron_expression == ""
+            )
+        ).all()
+        
+        for connection in connections_without_cron:
+            existing_job = db.query(SnowflakeJob).filter(
+                SnowflakeJob.connection_id == connection.id,
+                SnowflakeJob.is_active == True
+            ).first()
+            
+            if existing_job:
+                existing_job.is_active = False
+                jobs_deactivated += 1
+                logger.info("⏸️  Deactivated job for connection (no cron): %s", connection.connection_name)
+        
         # Commit all changes
         db.commit()
         
-        if jobs_created > 0 or jobs_updated > 0:
-            logger.info("✅ Job sync completed: %d created, %d updated", jobs_created, jobs_updated)
+        if jobs_created > 0 or jobs_updated > 0 or jobs_deactivated > 0:
+            logger.info("✅ Job sync completed: %d created, %d updated, %d deactivated", 
+                       jobs_created, jobs_updated, jobs_deactivated)
         else:
             logger.info("✅ Job sync completed: no changes needed")
             
