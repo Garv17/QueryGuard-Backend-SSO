@@ -1,6 +1,6 @@
 # QueryGuardAI Backend
 
-A FastAPI-based backend for QueryGuardAI - a data lineage and impact analysis tool for Snowflake queries.
+A FastAPI-based backend for QueryGuardAI - a data lineage and impact analysis tool for Snowflake queries with multi-tenant Snowflake crawler service.
 
 ## Features
 
@@ -8,6 +8,11 @@ A FastAPI-based backend for QueryGuardAI - a data lineage and impact analysis to
 - Database integration with PostgreSQL
 - RESTful API endpoints for auth operations
 - Secure password hashing and token management
+- Multi-tenant Snowflake crawler service with cron-based scheduling
+- Background polling worker for automated query history mining
+- Comprehensive audit trail for all crawler operations
+- GitHub App integration for repository monitoring
+- Jira integration for ticket management
 
 ## Setup
 
@@ -73,7 +78,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ### Snowflake Management
 
 - `POST /snowflake/test-connection` - Test Snowflake connection
-- `POST /snowflake/save-connection` - Save Snowflake connection (includes cron expression)
+- `POST /snowflake/save-connection` - Save Snowflake connection (includes cron expression for automated crawling)
 - `GET /snowflake/connections` - List all connections for organization
 - `GET /snowflake/fetch-databases/{connection_id}` - Fetch databases from Snowflake
 - `GET /snowflake/fetch-schemas/{connection_id}/{database_name}` - Fetch schemas for database
@@ -93,10 +98,11 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `POST /github/webhook` - Handle GitHub webhook events (PR events)
 - `POST /github/process-pr` - Process PR changes and add comment
 
-### Health Check
+### Health Check & Monitoring
 
 - `GET /` - API information
 - `GET /health` - Health check endpoint
+- `GET /worker-status` - Check background worker status
 
 ## Database Schema
 
@@ -154,6 +160,41 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `is_selected` (Boolean) - Selection status
 - `created_at` (DateTime) - Creation timestamp
 
+### Snowflake Jobs Table (Crawler Management)
+- `id` (UUID) - Primary key
+- `connection_id` (UUID) - Foreign key to snowflake_connections (unique)
+- `cron_expression` (String) - Cron expression for scheduling
+- `last_run_time` (DateTime) - Watermark for incremental fetching
+- `is_active` (Boolean) - Job status
+- `created_at` (DateTime) - Creation timestamp
+- `updated_at` (DateTime) - Last update timestamp
+
+### Snowflake Crawl Audits Table (Audit Trail)
+- `id` (UUID) - Primary key
+- `batch_id` (UUID) - Unique identifier for each crawl batch
+- `job_id` (UUID) - Foreign key to snowflake_jobs
+- `connection_id` (UUID) - Foreign key to snowflake_connections
+- `start_time` (DateTime) - Crawl execution start time
+- `end_time` (DateTime) - Crawl execution end time
+- `status` (String) - RUNNING/COMPLETED/FAILED
+- `rows_fetched` (Integer) - Number of records processed
+- `error_message` (Text) - Error details if failed
+- `created_at` (DateTime) - Creation timestamp
+
+### Snowflake Query Records Table (Query History)
+- `id` (UUID) - Primary key
+- `batch_id` (UUID) - Foreign key to snowflake_crawl_audits
+- `query_id` (String) - Snowflake query identifier
+- `query_text` (Text) - Full query text
+- `start_time` (DateTime) - Query execution start time
+- `end_time` (DateTime) - Query execution end time
+- `user_name` (String) - User who executed the query
+- `database_name` (String) - Database context
+- `schema_name` (String) - Schema context
+- `query_type` (String) - Type of query (SELECT, INSERT, etc.)
+- `execution_status` (String) - Query execution status
+- `created_at` (DateTime) - Creation timestamp
+
 ### GitHub Installations Table
 - `id` (UUID) - Primary key
 - `installation_id` (String) - GitHub installation ID
@@ -179,9 +220,126 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `created_at` (DateTime) - Creation timestamp
 - `updated_at` (DateTime) - Last update timestamp
 
+## Snowflake Crawler Service
+
+### Overview
+The multi-tenant Snowflake crawler service automatically mines query history from Snowflake accounts based on cron expressions. Each client can create multiple Snowflake connections with independent scheduling.
+
+### Key Features
+- **Multi-tenant Architecture**: Each client's connections are isolated
+- **Cron-based Scheduling**: Flexible scheduling using standard cron expressions
+- **Incremental Processing**: Only fetches data since last successful run
+- **Background Worker**: Runs independently every 5 minutes
+- **Comprehensive Audit Trail**: Tracks all operations with detailed logging
+- **Database/Schema Filtering**: Only processes queries from selected databases/schemas
+
+### How It Works
+
+#### 1. Job Creation & Synchronization
+When a Snowflake connection is saved with a `cron_expression`, a `SnowflakeJob` record is automatically created. Additionally, on every application startup, the system automatically synchronizes the jobs table with existing connections to ensure no jobs are missed:
+```json
+{
+  "connection_name": "Production DB",
+  "account": "your-account.snowflakecomputing.com",
+  "username": "your-username",
+  "password": "your-password",
+  "warehouse": "COMPUTE_WH",
+  "role": "ACCOUNTADMIN",
+  "cron_expression": "0 */6 * * *"  // Every 6 hours
+}
+```
+
+#### 2. Startup Synchronization
+On every application startup, the system automatically:
+- Scans all active connections with cron expressions
+- Creates missing job entries for connections without jobs
+- Updates existing jobs if cron expressions have changed
+- Ensures the jobs table is always in sync with connections
+
+#### 3. Background Worker
+- Runs every 10 minutes in a background thread (configurable)
+- Checks all active `SnowflakeJob` records
+- Uses `croniter` library to evaluate if jobs are due
+- Triggers crawler for due jobs
+- Enhanced logging with emojis for better visibility
+
+#### 4. Data Crawling Process
+For each due job:
+1. **Creates Audit Record**: Tracks the crawl operation
+2. **Determines Fetch Window**: 
+   - First run: Last 30 days
+   - Subsequent runs: Since `last_run_time`
+3. **Connects to Snowflake**: Using stored connection credentials
+4. **Queries History**: Fetches from `account_usage.query_history`
+5. **Applies Filters**: Only queries from selected databases/schemas
+6. **Stores Results**: Inserts query records into database
+7. **Updates Watermark**: Sets new `last_run_time` for next run
+
+#### 5. Cron Expression Examples
+- `0 */6 * * *` - Every 6 hours
+- `0 0 * * *` - Daily at midnight
+- `0 */2 * * *` - Every 2 hours
+- `0 9 * * 1` - Weekly on Monday at 9 AM
+
+### Database Schema Relationships
+```
+SnowflakeConnection (1:1) SnowflakeJob (1:many) SnowflakeCrawlAudit (1:many) SnowflakeQueryRecord
+```
+
+### Error Handling
+- **Invalid Cron Expressions**: Jobs are deactivated automatically
+- **Connection Failures**: Detailed error messages in audit records
+- **Partial Failures**: Database rollback ensures consistency
+- **Worker Resilience**: Continues processing other jobs if one fails
+
+### Monitoring and Logging
+- **Application Level**: Startup/shutdown events with emoji indicators
+- **Worker Level**: Job processing and cron evaluation with visual status
+- **Crawler Level**: Snowflake connections and data fetching with progress indicators
+- **Audit Trail**: Complete operation history with timestamps
+
+#### Enhanced Logging Features
+- **🚀 Startup**: Application initialization and worker startup
+- **⏰ Job Due**: When jobs are triggered based on cron expressions
+- **📊 Data Fetching**: Success with row counts and watermarks
+- **ℹ️ No Data**: When no new data is found since last run
+- **✅ Success**: Successful operations and completions
+- **❌ Errors**: Connection failures and processing errors
+- **🔄 Updates**: Job synchronization and worker status changes
+- **🛑 Shutdown**: Graceful application termination
+
+### Security Considerations
+- **Credential Isolation**: Each client's Snowflake credentials are encrypted and isolated
+- **Data Filtering**: Only processes queries from explicitly selected databases/schemas
+- **Audit Logging**: All operations are logged for compliance and debugging
+
 ## Development
 
-The application uses SQLAlchemy for database operations and JWT for authentication. The database models are defined in `app/utils/models.py` and the authentication logic is in `app/api/auth.py`.
+The application uses SQLAlchemy for database operations and JWT for authentication. The database models are defined in `app/utils/models.py` and the authentication logic is in `app/api/auth.py`. The Snowflake crawler service is implemented in `app/snowflake_crawler.py`.
+
+## Crawler Configuration
+
+### Worker Settings
+- **Polling Interval**: 10 minutes (600 seconds) - configurable in `app/snowflake_crawler.py`
+- **Job Evaluation**: Uses `croniter` library for precise cron expression parsing
+- **Error Handling**: Automatic retry and graceful failure handling
+
+### Logging Configuration
+The crawler uses enhanced logging with emojis for better visibility:
+
+```
+🚀 Starting Snowflake crawler worker (interval: 600 seconds)
+⏰ Job due: fd4b938c (cron: */5 * * * *)
+📊 Crawl completed: 178 rows fetched, watermark: 2025-09-23 09:15:30
+✅ Processed 1 due jobs
+```
+
+### Cron Expression Examples
+- `0 */6 * * *`: Every 6 hours
+- `0 0 * * *`: Daily at midnight
+- `0 */2 * * *`: Every 2 hours
+- `0 9 * * 1`: Weekly on Monday at 9 AM
+- `*/5 * * * *`: Every 5 minutes (for testing)
 
 ## GitHub App Setup
 

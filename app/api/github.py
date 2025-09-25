@@ -198,6 +198,7 @@ def github_callback(
     setup_action: Optional[str] = None,
     state: Optional[str] = None,
     code: Optional[str] = None,
+    code: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """Handle GitHub App installation callback"""
@@ -212,7 +213,12 @@ def github_callback(
         normalized_state = unquote(state)
         if normalized_state.startswith('/'):
             normalized_state = normalized_state[1:]
+        # Decode and normalize state; GitHub may send it URL-encoded and with a leading '/'
+        normalized_state = unquote(state)
+        if normalized_state.startswith('/'):
+            normalized_state = normalized_state[1:]
         # Validate state (org_id) format
+        org_uuid = uuid.UUID(normalized_state)
         org_uuid = uuid.UUID(normalized_state)
     except ValueError:
         logger.warning("/github/callback - invalid state format: %s", state)

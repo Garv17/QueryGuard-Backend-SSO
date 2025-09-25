@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, ForeignKey
+from sqlalchemy import Column, String, DateTime, Text, Boolean, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -67,6 +67,7 @@ class SnowflakeConnection(Base):
     # Relationships
     organization = relationship("Organization", backref="snowflake_connections")
     databases = relationship("SnowflakeDatabase", back_populates="connection", cascade="all, delete-orphan")
+    job = relationship("SnowflakeJob", back_populates="connection", uselist=False, cascade="all, delete-orphan")
 
 
 class SnowflakeDatabase(Base):
@@ -177,3 +178,53 @@ class JiraTicket(Base):
     # Relationships
     connection = relationship("JiraConnection", backref="tickets")
     creator = relationship("User", backref="created_jira_tickets")
+
+
+# Snowflake crawler job and audit models
+
+class SnowflakeJob(Base):
+    __tablename__ = "snowflake_jobs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), unique=True, nullable=False, index=True)
+    cron_expression = Column(String(100), nullable=False)
+    last_run_time = Column(DateTime(timezone=True), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    connection = relationship("SnowflakeConnection", back_populates="job")
+
+
+class SnowflakeCrawlAudit(Base):
+    __tablename__ = "snowflake_crawl_audit"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    batch_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
+    scheduled_at = Column(DateTime(timezone=True), nullable=False)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(20), nullable=False, default="running")  # running|success|failed
+    rows_fetched = Column(Integer, nullable=False, default=0)
+    error_message = Column(Text, nullable=True)
+
+
+class SnowflakeQueryRecord(Base):
+    __tablename__ = "snowflake_query_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    batch_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
+    query_id = Column(String(100), nullable=False, index=True)
+    query_text = Column(Text, nullable=True)
+    database_name = Column(String(200), nullable=True)
+    schema_name = Column(String(200), nullable=True)
+    user_name = Column(String(200), nullable=True)
+    start_time = Column(DateTime(timezone=True), nullable=False)
+    end_time = Column(DateTime(timezone=True), nullable=True)
+    rows_produced = Column(Integer, nullable=True)
+    rows_inserted = Column(Integer, nullable=True)
+    rows_updated = Column(Integer, nullable=True)
+    rows_deleted = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
