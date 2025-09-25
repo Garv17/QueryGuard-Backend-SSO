@@ -8,6 +8,7 @@ from app.api import auth, organizations, snowflake, github, jira, impact
 import logging
 import sys
 from app.vector_db import init_org_vector_store
+from sqlalchemy import or_
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
@@ -61,7 +62,7 @@ def sync_jobs_with_connections():
         # Handle connections with empty cron expressions - deactivate their jobs
         connections_without_cron = db.query(SnowflakeConnection).filter(
             SnowflakeConnection.is_active == True,
-            db.or_(
+            or_(
                 SnowflakeConnection.cron_expression.is_(None),
                 SnowflakeConnection.cron_expression == ""
             )

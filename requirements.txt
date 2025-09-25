@@ -21,6 +21,7 @@ chromadb==1.0.15
 click==8.2.1
 coloredlogs==15.0.1
 comm==0.2.3
+croniter==6.0.0
 cryptography==41.0.7
 dataclasses-json==0.6.7
 debugpy==1.8.16
