@@ -98,10 +98,11 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `POST /github/webhook` - Handle GitHub webhook events (PR events)
 - `POST /github/process-pr` - Process PR changes and add comment
 
-### Health Check
+### Health Check & Monitoring
 
 - `GET /` - API information
 - `GET /health` - Health check endpoint
+- `GET /worker-status` - Check background worker status
 
 ## Database Schema
 
@@ -234,8 +235,8 @@ The multi-tenant Snowflake crawler service automatically mines query history fro
 
 ### How It Works
 
-#### 1. Job Creation
-When a Snowflake connection is saved with a `cron_expression`, a `SnowflakeJob` record is automatically created:
+#### 1. Job Creation & Synchronization
+When a Snowflake connection is saved with a `cron_expression`, a `SnowflakeJob` record is automatically created. Additionally, on every application startup, the system automatically synchronizes the jobs table with existing connections to ensure no jobs are missed:
 ```json
 {
   "connection_name": "Production DB",
@@ -248,13 +249,21 @@ When a Snowflake connection is saved with a `cron_expression`, a `SnowflakeJob` 
 }
 ```
 
-#### 2. Background Worker
-- Runs every 5 minutes in a background thread
+#### 2. Startup Synchronization
+On every application startup, the system automatically:
+- Scans all active connections with cron expressions
+- Creates missing job entries for connections without jobs
+- Updates existing jobs if cron expressions have changed
+- Ensures the jobs table is always in sync with connections
+
+#### 3. Background Worker
+- Runs every 10 minutes in a background thread (configurable)
 - Checks all active `SnowflakeJob` records
 - Uses `croniter` library to evaluate if jobs are due
 - Triggers crawler for due jobs
+- Enhanced logging with emojis for better visibility
 
-#### 3. Data Crawling Process
+#### 4. Data Crawling Process
 For each due job:
 1. **Creates Audit Record**: Tracks the crawl operation
 2. **Determines Fetch Window**: 
@@ -266,7 +275,7 @@ For each due job:
 6. **Stores Results**: Inserts query records into database
 7. **Updates Watermark**: Sets new `last_run_time` for next run
 
-#### 4. Cron Expression Examples
+#### 5. Cron Expression Examples
 - `0 */6 * * *` - Every 6 hours
 - `0 0 * * *` - Daily at midnight
 - `0 */2 * * *` - Every 2 hours
@@ -284,10 +293,20 @@ SnowflakeConnection (1:1) SnowflakeJob (1:many) SnowflakeCrawlAudit (1:many) Sno
 - **Worker Resilience**: Continues processing other jobs if one fails
 
 ### Monitoring and Logging
-- **Application Level**: Startup/shutdown events
-- **Worker Level**: Job processing and cron evaluation
-- **Crawler Level**: Snowflake connections and data fetching
+- **Application Level**: Startup/shutdown events with emoji indicators
+- **Worker Level**: Job processing and cron evaluation with visual status
+- **Crawler Level**: Snowflake connections and data fetching with progress indicators
 - **Audit Trail**: Complete operation history with timestamps
+
+#### Enhanced Logging Features
+- **🚀 Startup**: Application initialization and worker startup
+- **⏰ Job Due**: When jobs are triggered based on cron expressions
+- **📊 Data Fetching**: Success with row counts and watermarks
+- **ℹ️ No Data**: When no new data is found since last run
+- **✅ Success**: Successful operations and completions
+- **❌ Errors**: Connection failures and processing errors
+- **🔄 Updates**: Job synchronization and worker status changes
+- **🛑 Shutdown**: Graceful application termination
 
 ### Security Considerations
 - **Credential Isolation**: Each client's Snowflake credentials are encrypted and isolated
@@ -297,6 +316,30 @@ SnowflakeConnection (1:1) SnowflakeJob (1:many) SnowflakeCrawlAudit (1:many) Sno
 ## Development
 
 The application uses SQLAlchemy for database operations and JWT for authentication. The database models are defined in `app/utils/models.py` and the authentication logic is in `app/api/auth.py`. The Snowflake crawler service is implemented in `app/snowflake_crawler.py`.
+
+## Crawler Configuration
+
+### Worker Settings
+- **Polling Interval**: 10 minutes (600 seconds) - configurable in `app/snowflake_crawler.py`
+- **Job Evaluation**: Uses `croniter` library for precise cron expression parsing
+- **Error Handling**: Automatic retry and graceful failure handling
+
+### Logging Configuration
+The crawler uses enhanced logging with emojis for better visibility:
+
+```
+🚀 Starting Snowflake crawler worker (interval: 600 seconds)
+⏰ Job due: fd4b938c (cron: */5 * * * *)
+📊 Crawl completed: 178 rows fetched, watermark: 2025-09-23 09:15:30
+✅ Processed 1 due jobs
+```
+
+### Cron Expression Examples
+- `0 */6 * * *`: Every 6 hours
+- `0 0 * * *`: Daily at midnight
+- `0 */2 * * *`: Every 2 hours
+- `0 9 * * 1`: Weekly on Monday at 9 AM
+- `*/5 * * * *`: Every 5 minutes (for testing)
 
 ## GitHub App Setup
 
