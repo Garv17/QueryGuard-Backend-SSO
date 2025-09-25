@@ -4,10 +4,11 @@ from app.database import init_db, SessionLocal
 from app.snowflake_crawler import polling_worker
 from app.utils.models import SnowflakeConnection, SnowflakeJob
 import threading
-from app.api import auth, organizations, snowflake, github, jira
+from app.api import auth, organizations, snowflake, github, jira, impact
 import logging
 import sys
-
+from app.vector_db import init_org_vector_store
+from sqlalchemy import or_
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
@@ -61,7 +62,7 @@ def sync_jobs_with_connections():
         # Handle connections with empty cron expressions - deactivate their jobs
         connections_without_cron = db.query(SnowflakeConnection).filter(
             SnowflakeConnection.is_active == True,
-            db.or_(
+            or_(
                 SnowflakeConnection.cron_expression.is_(None),
                 SnowflakeConnection.cron_expression == ""
             )
@@ -115,6 +116,7 @@ app.include_router(organizations.router)
 app.include_router(snowflake.router)
 app.include_router(github.router)
 app.include_router(jira.router)
+app.include_router(impact.router)
 
 @app.on_event("startup")
 async def startup_event():
@@ -124,6 +126,9 @@ async def startup_event():
     # Initialize database
     init_db()
     logger.info("📊 Database initialized")
+    ## Temporary vector database initialization for intelytics org
+    DB = init_org_vector_store("76d33fb3-6062-456b-a211-4aec9971f8be", "temp_lineage_data/lineage_output_deep.csv")
+    logger.info("Vector database initialized for intelytics org")
     
     # Sync jobs with connections
     sync_jobs_with_connections()
