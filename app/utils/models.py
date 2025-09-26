@@ -228,3 +228,19 @@ class SnowflakeQueryRecord(Base):
     rows_updated = Column(Integer, nullable=True)
     rows_deleted = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class LineageLoadWatermark(Base):
+    __tablename__ = "lineage_load_watermarks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_query_history.batch_id"), nullable=False, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
+    last_processed_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    batch = relationship("SnowflakeQueryRecord", foreign_keys=[batch_id], viewonly=True)
+    connection = relationship("SnowflakeConnection", backref="lineage_watermarks")
+      
+

@@ -30,57 +30,25 @@ def get_pg_engine():
         raise
 
 # Query to fetch data
-def fetch_query_access_history_and_information_schema_columns(engine):
+def fetch_query_access_history_and_information_schema_columns(engine, conn_id):
     fetch_query_access_history_query = """
-                SELECT *
-            FROM (
-                SELECT DISTINCT ON (query_type) *
-                FROM "QUERY_ACCESS_HISTORY"
-                WHERE query_text LIKE '%opscustomer__dbt_tmp%'
-                ORDER BY query_type, query_start_time DESC
-            ) t1
-            UNION
-            SELECT *
-            FROM (
-                SELECT DISTINCT ON (query_type) *
-                FROM "QUERY_ACCESS_HISTORY"
-                WHERE query_text LIKE '%allocationrule__dbt_tmp%'
-                ORDER BY query_type, query_start_time DESC
-            ) t2
-            UNION
-            SELECT *
-            FROM (
-                SELECT DISTINCT ON (query_type) *
-                FROM "QUERY_ACCESS_HISTORY"
-                WHERE query_text LIKE '%factlisting__dbt_tmp%'
-                ORDER BY query_type, query_start_time DESC
-            ) t3
-            UNION
-            SELECT *
-            FROM (
-                SELECT DISTINCT ON (query_type) *
-                FROM "QUERY_ACCESS_HISTORY"
-                WHERE query_text LIKE '%mtmdaysdiscrepancy__dbt_tmp%'
-                ORDER BY query_type, query_start_time DESC
-            ) t4
-                UNION
-            SELECT *
-            FROM (
-                SELECT DISTINCT ON (query_type) *
-                FROM "QUERY_ACCESS_HISTORY"
-                WHERE query_text LIKE '%opsproduct__dbt_tmp%'
-                ORDER BY query_type, query_start_time DESC
-            ) t5;
-
+                SELECT * 
+                FROM snowflake_query_history
+                WHERE created_at > COALESCE(
+                    (SELECT MAX(last_processed_at) 
+                    FROM lineage_load_watermarks
+                    WHERE connection_id = :conn_id),
+                    '1900-01-01'  -- very old default date
+                );
     """
 
     fetch_information_schema_columns_query = """
-        select * from "INFORMATION_SCHEMA_COLUMNS"
+        select * from "INFORMATION_SCHEMA_COLUMNS WHERE connection_id = :conn_id "
     """
 
     try:
         with engine.connect() as connection:
-            return pd.read_sql(text(fetch_query_access_history_query), connection), pd.read_sql(text(fetch_information_schema_columns_query), connection)
+            return pd.read_sql(text(fetch_query_access_history_query), connection, params={"conn_id": conn_id}), pd.read_sql(text(fetch_information_schema_columns_query), connection, params={"conn_id": conn_id})
     except Exception as e:
         logger.error("Error while querying NeonDB: %s", e, exc_info=True)
         raise

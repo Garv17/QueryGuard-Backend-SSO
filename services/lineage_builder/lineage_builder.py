@@ -170,11 +170,14 @@ def consolidate_lineage(all_lineages: list, all_edges: list) -> pd.DataFrame:
 
     return df
 
-def main():
+def main(conn_id):
     try:
         pg_engine = sqllineage_lineage.get_pg_engine()
-        fetch_query_history_df, information_schema_columns_df = sqllineage_lineage.fetch_query_access_history_and_information_schema_columns(pg_engine)
+        fetch_query_history_df, information_schema_columns_df = sqllineage_lineage.fetch_query_access_history_and_information_schema_columns(pg_engine, conn_id)
         logger.info("fetch_query_history_df and information_schema_columns_df retrieved")
+        latest_batch_id = fetch_query_history_df["batch_id"].iloc[0]
+        last_processed_at = fetch_query_history_df["created_at"].max()
+        connection_id = fetch_query_history_df["connection_id"].iloc[0]
         final_df = sqllineage_lineage.combine_queries_by_session(fetch_query_history_df)
         final_df['base_objects_accessed'] = final_df['base_objects_accessed'].apply(ast.literal_eval)
         for query_id, query_text, query_type, session_id, base_objects_accessed, database_name, schema_name in final_df[['query_id', 'query_text', 'query_type', 'session_id', 'base_objects_accessed', 'database_name', 'schema_name']].values:
@@ -261,6 +264,7 @@ def main():
             with pg_engine.begin() as connection:
                 final_filter_clause_df.to_sql("filter_clause_dependent_column_lineage", connection, if_exists="append", index=False)
                 logger.info(f"Inserted {len(final_filter_clause_df)} lineage records into filter_clause_dependent_column_lineage")
+
 
     except Exception as e:
         logger.critical("Fatal error in main execution: %s", e)
