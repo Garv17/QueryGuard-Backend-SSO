@@ -1,7 +1,8 @@
 import pandas as pd
 import subprocess
 import csv
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, func
+from sqlalchemy.orm import Session
 from sqllineage.runner import LineageRunner
 import os
 import re
@@ -11,7 +12,14 @@ import ast
 from sqlglot import parse_one, exp
 import logging
 import sys
-
+from datetime import datetime
+from app.utils.models import (
+    SnowflakeQueryRecord,
+    InformationSchemacolumns,
+    LineageLoadWatermark,
+    ColumnLevelLineage,
+    FilterClauseColumnLineage
+)
 
 # Logging Setup
 logger = logging.getLogger("lineage.sqllineage_lineage")
@@ -30,28 +38,69 @@ def get_pg_engine():
         raise
 
 # Query to fetch data
-def fetch_query_access_history_and_information_schema_columns(engine, conn_id):
-    fetch_query_access_history_query = """
-                SELECT * 
-                FROM snowflake_query_history
-                WHERE created_at > COALESCE(
-                    (SELECT MAX(last_processed_at) 
-                    FROM lineage_load_watermarks
-                    WHERE connection_id = :conn_id),
-                    '1900-01-01'  -- very old default date
-                );
-    """
+def fetch_query_access_history_and_information_schema_columns(engine, org_id, conn_id, batch_id):
+    with Session(engine) as session:
+        # Get last processed timestamp (or default to very old date)
+        last_processed = (
+            session.query(func.max(LineageLoadWatermark.last_processed_at))
+            .filter_by(connection_id=conn_id, org_id=org_id, batch_id=batch_id)
+            .scalar()
+        ) or datetime(1900, 1, 1)
 
-    fetch_information_schema_columns_query = """
-        select * from "INFORMATION_SCHEMA_COLUMNS WHERE connection_id = :conn_id "
-    """
+        # Fetch query history
+        query_history = (
+            session.query(SnowflakeQueryRecord)
+            .filter(SnowflakeQueryRecord.created_at > last_processed)
+            .all()
+        )
 
-    try:
-        with engine.connect() as connection:
-            return pd.read_sql(text(fetch_query_access_history_query), connection, params={"conn_id": conn_id}), pd.read_sql(text(fetch_information_schema_columns_query), connection, params={"conn_id": conn_id})
-    except Exception as e:
-        logger.error("Error while querying NeonDB: %s", e, exc_info=True)
-        raise
+        # Fetch information schema columns
+        info_schema = (
+            session.query(InformationSchemacolumns)
+            .filter_by(connection_id=conn_id, org_id=org_id, batch_id=batch_id)
+            .all()
+        )
+
+        # Fetch historical column level lineage
+        historical_column_level_lineage = (
+            session.query(ColumnLevelLineage)
+            .filter_by(connection_id=conn_id, org_id=org_id, is_active=1)
+            .all()
+        )
+
+        # Fetch historical filter clause column lineage
+        historical_filter_clause_column_lineage = (
+            session.query(FilterClauseColumnLineage)
+            .filter_by(connection_id=conn_id, org_id=org_id, is_active=1)
+            .all()
+        )
+
+        # Convert ORM objects → DataFrame
+        if query_history:
+            query_history_df = pd.DataFrame([r.__dict__ for r in query_history])
+            query_history_df = query_history_df.drop("_sa_instance_state", axis=1, errors="ignore")
+        else:
+            query_history_df = pd.DataFrame(columns=[col.name for col in SnowflakeQueryRecord.__table__.columns])
+
+        if info_schema:
+            info_schema_df = pd.DataFrame([r.__dict__ for r in info_schema])
+            info_schema_df = info_schema_df.drop("_sa_instance_state", axis=1, errors="ignore")
+        else:
+            info_schema_df = pd.DataFrame(columns=[col.name for col in InformationSchemacolumns.__table__.columns])
+
+        if historical_column_level_lineage:
+            historical_column_level_lineage_df = pd.DataFrame([r.__dict__ for r in historical_column_level_lineage])
+            historical_column_level_lineage_df = historical_column_level_lineage_df.drop("_sa_instance_state", axis=1, errors="ignore")
+        else:
+            historical_column_level_lineage_df = pd.DataFrame(columns=[col.name for col in ColumnLevelLineage.__table__.columns])
+
+        if historical_filter_clause_column_lineage:
+            historical_filter_clause_column_lineage_df = pd.DataFrame([r.__dict__ for r in historical_filter_clause_column_lineage])
+            historical_filter_clause_column_lineage_df = historical_filter_clause_column_lineage_df.drop("_sa_instance_state", axis=1, errors="ignore")
+        else:
+            historical_filter_clause_column_lineage_df = pd.DataFrame(columns=[col.name for col in FilterClauseColumnLineage.__table__.columns])
+
+        return query_history_df, info_schema_df, historical_column_level_lineage_df, historical_filter_clause_column_lineage_df
 
 
 # Function to safely parse and convert to string
@@ -524,6 +573,7 @@ def parse_lineage_text(query_id, cleaned_query, query_type, session_id, base_obj
                                     "query_id": query_id,
                                     "query_type": query_type,
                                     "session_id": session_id,
+                                    "dbt_model_file_path": None,
                                     "dependency_score": dependency_score
                                 })
                         else:
@@ -563,6 +613,7 @@ def parse_lineage_text(query_id, cleaned_query, query_type, session_id, base_obj
                     "query_id": query_id,
                     "query_type": query_type,
                     "session_id": session_id,
+                    "dbt_model_file_path": None,
                     "dependency_score": dependency_score
                 })
 

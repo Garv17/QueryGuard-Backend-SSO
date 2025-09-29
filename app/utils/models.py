@@ -1,5 +1,5 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, ForeignKey, Integer
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, DateTime, Text, Boolean, ForeignKey, Integer, BigInteger
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -200,47 +200,137 @@ class SnowflakeCrawlAudit(Base):
     __tablename__ = "snowflake_crawl_audit"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
     batch_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
     scheduled_at = Column(DateTime(timezone=True), nullable=False)
     started_at = Column(DateTime(timezone=True), server_default=func.now())
     finished_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String(20), nullable=False, default="running")  # running|success|failed
-    rows_fetched = Column(Integer, nullable=False, default=0)
+    query_history_rows_fetched = Column(Integer, nullable=False, default=0)
+    information_schema_columns_rows_fetched = Column(Integer, nullable=False, default=0)
     error_message = Column(Text, nullable=True)
+
+    organization = relationship("Organization", foreign_keys=[org_id], backref="snowflake_crawl_audits_org_id")
+    connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="snowflake_crawl_audits_conn_id")
 
 
 class SnowflakeQueryRecord(Base):
     __tablename__ = "snowflake_query_history"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
     batch_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
     query_id = Column(String(100), nullable=False, index=True)
     query_text = Column(Text, nullable=True)
     database_name = Column(String(200), nullable=True)
+    database_id = Column(Integer, nullable=True)
     schema_name = Column(String(200), nullable=True)
-    user_name = Column(String(200), nullable=True)
+    schema_id = Column(Integer, nullable=True)
     start_time = Column(DateTime(timezone=True), nullable=False)
     end_time = Column(DateTime(timezone=True), nullable=True)
-    rows_produced = Column(Integer, nullable=True)
-    rows_inserted = Column(Integer, nullable=True)
-    rows_updated = Column(Integer, nullable=True)
-    rows_deleted = Column(Integer, nullable=True)
+    session_id = Column(BigInteger, nullable=True)
+    base_objects_accessed = Column(JSONB, nullable=True)
+    objects_modified = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    organization = relationship("Organization", foreign_keys=[org_id], backref="snowflake_query_record_ord_id")
+    connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="snowflake_query_record_conn_id")
+
+
+class InformationSchemacolumns(Base):
+    __tablename__ = "information_schema_columns"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_query_history.batch_id"), nullable=False, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
+    table_catalog = Column(String(200), nullable=True)
+    table_schema = Column(String(200), nullable=True)
+    table_name = Column(String(200), nullable=True)
+    column_name = Column(String(200), nullable=True)
+    data_type = Column(String(100), nullable=True)
+    ordinal_position = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[org_id], backref="information_schema_columns_org_id")
+    batch = relationship("SnowflakeQueryRecord", foreign_keys=[batch_id], viewonly=True)
+    connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="information_schema_columns_conn_id")
+
+class ColumnLevelLineage(Base):
+    __tablename__ = "column_level_lineage"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_query_history.batch_id"), nullable=False, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
+    source_database = Column(String(200), nullable=True)
+    source_schema = Column(String(200), nullable=True)
+    source_table = Column(String(200), nullable=True)
+    source_column = Column(String(200), nullable=True)
+    target_database = Column(String(200), nullable=True)
+    target_schema = Column(String(200), nullable=True)
+    target_table = Column(String(200), nullable=True)
+    target_column = Column(String(200), nullable=True)
+    query_id = Column(JSONB, nullable=True)  # store list of query IDs
+    query_type = Column(String(50), nullable=True)
+    session_id = Column(BigInteger, nullable=True)
+    dependency_score = Column(Integer, nullable=True)
+    dbt_model_file_path = Column(String(200), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    is_active = Column(Integer, nullable=False, server_default="1")
+    
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[org_id], backref="column_level_lineage_org_id")
+    batch = relationship("SnowflakeQueryRecord", foreign_keys=[batch_id], viewonly=True)
+    connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="column_level_lineage_conn_id")
+
+class FilterClauseColumnLineage(Base):
+    __tablename__ = "filter_clause_column_lineage"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_query_history.batch_id"), nullable=False, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
+    source_database = Column(String(200), nullable=True)
+    source_schema = Column(String(200), nullable=True)
+    source_table = Column(String(200), nullable=True)
+    source_column = Column(String(200), nullable=True)
+    target_database = Column(String(200), nullable=True)
+    target_schema = Column(String(200), nullable=True)
+    target_table = Column(String(200), nullable=True)
+    target_column = Column(String(200), nullable=True)
+    query_id = Column(JSONB, nullable=True)  # store list of query IDs
+    query_type = Column(String(50), nullable=True)
+    session_id = Column(BigInteger, nullable=True)
+    dependency_score = Column(Integer, nullable=True)
+    dbt_model_file_path = Column(String(200), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    is_active = Column(Integer, nullable=False, server_default="1")
+    
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[org_id], backref="filter_clause_column_org_id")
+    batch = relationship("SnowflakeQueryRecord", foreign_keys=[batch_id], viewonly=True)
+    connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="filter_clause_column_conn_id")
 
 
 class LineageLoadWatermark(Base):
     __tablename__ = "lineage_load_watermarks"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
     batch_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_query_history.batch_id"), nullable=False, index=True)
     connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
     last_processed_at = Column(DateTime(timezone=True), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
+    organization = relationship("Organization", foreign_keys=[org_id], backref="lineage_load_watermark_org_id")
     batch = relationship("SnowflakeQueryRecord", foreign_keys=[batch_id], viewonly=True)
-    connection = relationship("SnowflakeConnection", backref="lineage_watermarks")
+    connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="lineage_watermarks_conn_id")
       
 

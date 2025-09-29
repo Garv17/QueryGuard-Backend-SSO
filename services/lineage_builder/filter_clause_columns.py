@@ -808,6 +808,10 @@ def get_dependent_columns(df):
             sql_query = row['query_text']
             base_objects_accessed = row['base_objects_accessed']
             query_id = row['query_id']
+            query_type = row['query_type']
+            session_id = row['session_id']
+            dependency_score = row['dependency_score']
+            dbt_model_file_path = row['dbt_model_file_path']
             cleaned_query = detect_and_replace_named_parameters(sql_query, static_value="null")
             result = get_bidirectional_column_lineage(fully_qualified_source_column_name, fully_qualified_target_column_name, cleaned_query)
 
@@ -846,7 +850,11 @@ def get_dependent_columns(df):
                         "target_schema": row['target_schema'].lower(),
                         "target_table": row['target_table'].lower(),
                         "target_column": row['target_column'].lower(),
-                        'query_id': query_id
+                        "query_id": query_id,
+                        "query_type": query_type,
+                        "session_id": session_id,
+                        "dependency_score": dependency_score,
+                        "dbt_model_file_path": dbt_model_file_path
                     })
 
         return rows

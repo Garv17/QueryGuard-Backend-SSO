@@ -16,6 +16,7 @@ from app.utils.models import (
     SnowflakeSchema,
     SnowflakeCrawlAudit,
     SnowflakeQueryRecord,
+    InformationSchemacolumns
 )
 import snowflake.connector
 
@@ -34,7 +35,7 @@ def _due_to_run(cron_expr: str, last_run: Optional[datetime], now: datetime) -> 
         return False
 
 
-def _fetch_delta_query_history(conn: SnowflakeConnection, since: datetime) -> list[dict]:
+def _fetch_delta_query_history(conn: SnowflakeConnection, since: datetime) -> tuple[list[dict], list[dict]]:
     sf_conn = snowflake.connector.connect(
         user=conn.username,
         password=conn.password,
@@ -61,11 +62,56 @@ def _fetch_delta_query_history(conn: SnowflakeConnection, since: datetime) -> li
                 schema_conditions.append(f"(database_name=%(db_name_{i})s AND schema_name=%(schema_name_{i})s)")
             where_parts.append("(" + " OR ".join(schema_conditions) + ")")
 
-        sql = (
-            "SELECT query_id, query_text, database_name, schema_name, user_name, start_time, end_time, "
-            "rows_produced, rows_inserted, rows_updated, rows_deleted "
-            "FROM snowflake.account_usage.query_history WHERE " + " AND ".join(where_parts) + " ORDER BY start_time"
-        )
+        query_access_history_query = f"""
+            WITH ranked_queries AS (
+                SELECT query_text,
+                       query_id,
+                       query_type,
+                       start_time,
+                       end_time,
+                       database_id,
+                       database_name,
+                       schema_id,
+                       schema_name,
+                       session_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY query_text
+                           ORDER BY start_time DESC
+                       ) AS rn
+                FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+                WHERE {" AND ".join(where_parts)}
+                  AND QUERY_TYPE IN ('INSERT', 'MERGE', 'CREATE_VIEW')
+                  AND execution_status = 'SUCCESS'
+            )
+            SELECT rq.query_id,
+                   rq.start_time,
+                   rq.end_time,
+                   ah.base_objects_accessed,
+                   ah.objects_modified,
+                   rq.query_text,
+                   rq.query_type,
+                   rq.database_id,
+                   rq.database_name,
+                   rq.schema_id,
+                   rq.schema_name,
+                   rq.session_id
+            FROM SNOWFLAKE.ACCOUNT_USAGE.ACCESS_HISTORY ah
+            JOIN ranked_queries rq
+              ON ah.query_id = rq.query_id
+            WHERE rq.rn = 1
+            ORDER BY rq.start_time DESC;
+        """
+
+        query_information_schema_columns = """
+            SELECT TABLE_CATALOG as table_catalog,
+                   TABLE_SCHEMA as table_schema,
+                   TABLE_NAME as table_name,
+                   COLUMN_NAME as column_name,
+                   DATA_TYPE as data_type,
+                   ORDINAL_POSITION as ordinal_position
+            FROM SNOWFLAKE.ACCOUNT_USAGE.COLUMNS
+            WHERE DELETED IS NULL;
+        """
         
         # Build parameter dictionary
         bind_params = {"since": since.isoformat()}
@@ -74,16 +120,20 @@ def _fetch_delta_query_history(conn: SnowflakeConnection, since: datetime) -> li
                 bind_params[f"db_name_{i}"] = dbname
                 bind_params[f"schema_name_{i}"] = sname
         
-        cursor.execute(sql, bind_params)
+        cursor.execute(query_access_history_query, bind_params)
         cols = [c[0].lower() for c in cursor.description]
         rows = [dict(zip(cols, r)) for r in cursor.fetchall()]
-        return rows
+
+        cursor.execute(query_information_schema_columns)
+        cols2 = [c[0].lower() for c in cursor.description]
+        column_info_rows = [dict(zip(cols2, r)) for r in cursor.fetchall()]
+
+        return rows, column_info_rows
     finally:
         try:
             sf_conn.close()
         except Exception:
             pass
-
 
 def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> None:
     conn: SnowflakeConnection = (
@@ -97,6 +147,7 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
     batch_id = uuid.uuid4()
     
     audit = SnowflakeCrawlAudit(
+        org_id=conn.org_id,
         batch_id=batch_id,
         connection_id=conn.id,
         scheduled_at=now,
@@ -106,7 +157,7 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
     db.flush()
 
     try:
-        rows = _fetch_delta_query_history(conn, since)
+        rows, column_info_rows = _fetch_delta_query_history(conn, since)
         
         max_end = since
         to_insert = []
@@ -120,37 +171,66 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
             if end_time and end_time > max_end:
                 max_end = end_time
             rec = SnowflakeQueryRecord(
+                org_id=conn.org_id,
                 batch_id=batch_id,
                 connection_id=conn.id,
                 query_id=r.get("query_id"),
                 query_text=r.get("query_text"),
                 database_name=r.get("database_name"),
+                database_id=r.get("database_id"),
                 schema_name=r.get("schema_name"),
-                user_name=r.get("user_name"),
+                schema_id=r.get("schema_id"),
                 start_time=r.get("start_time"),
                 end_time=r.get("end_time"),
-                rows_produced=r.get("rows_produced"),
-                rows_inserted=r.get("rows_inserted"),
-                rows_updated=r.get("rows_updated"),
-                rows_deleted=r.get("rows_deleted"),
+                session_id=r.get("session_id"),
+                base_objects_accessed=r.get("base_objects_accessed"),
+                objects_modified=r.get("objects_modified")
             )
             to_insert.append(rec)
         
         if to_insert:
             db.bulk_save_objects(to_insert)
-            
-        job.last_run_time = max_end
-        audit.status = "success"
-        audit.rows_fetched = len(to_insert)
-        audit.finished_at = datetime.now(timezone.utc)
-        db.commit()
-        
+
         if len(to_insert) > 0:
             logger.info("📊 Crawl completed: %d rows fetched, watermark: %s", 
                        len(to_insert), max_end.strftime("%Y-%m-%d %H:%M:%S"))
         else:
             logger.info("ℹ️  Crawl completed: No new data found, watermark: %s", 
                        max_end.strftime("%Y-%m-%d %H:%M:%S"))
+            
+        # ---- Insert InformationSchemacolumns ----
+        column_objects = []
+        for c in column_info_rows:
+            col_rec = InformationSchemacolumns(
+                org_id=conn.org_id,
+                batch_id=batch_id,
+                connection_id=conn.id,
+                table_catalog=c.get("table_catalog"),
+                table_schema=c.get("table_schema"),
+                table_name=c.get("table_name"),
+                column_name=c.get("column_name"),
+                data_type=c.get("data_type"),
+                ordinal_position=c.get("ordinal_position")
+            )
+            column_objects.append(col_rec)
+        
+        if column_objects:
+            db.bulk_save_objects(column_objects)
+
+        if len(column_objects) > 0:
+            logger.info("📊 Crawl completed: %d rows fetched, watermark: %s", 
+                       len(column_objects), max_end.strftime("%Y-%m-%d %H:%M:%S"))
+        else:
+            logger.info("ℹ️  Crawl completed: No new data found, watermark: %s", 
+                       max_end.strftime("%Y-%m-%d %H:%M:%S"))
+            
+        job.last_run_time = max_end
+        audit.status = "success"
+        audit.query_history_rows_fetched = len(to_insert)
+        audit.information_schema_columns_rows_fetched = len(column_objects)
+        audit.finished_at = datetime.now(timezone.utc)
+        db.commit()
+        
                    
     except Exception as e:
         db.rollback()
