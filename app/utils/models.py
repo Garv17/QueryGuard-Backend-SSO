@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, DateTime, Text, Boolean, ForeignKey, Integer
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -228,3 +228,23 @@ class SnowflakeQueryRecord(Base):
     rows_updated = Column(Integer, nullable=True)
     rows_deleted = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GitHubPullRequestAnalysis(Base):
+    __tablename__ = "github_pr_analyses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    installation_id = Column(UUID(as_uuid=True), ForeignKey("github_installations.id"), nullable=False, index=True)
+    repository_id = Column(UUID(as_uuid=True), ForeignKey("github_repositories.id"), nullable=True, index=True)
+    repo_full_name = Column(String(200), nullable=False, index=True)
+    pr_number = Column(Integer, nullable=False, index=True)
+    pr_title = Column(String(500), nullable=True)
+    analysis_data = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Optional relationships
+    # organization = relationship("Organization", backref="pr_analyses")
+    # installation = relationship("GitHubInstallation", backref="pr_analyses")
+    # repository = relationship("GitHubRepository", backref="pr_analyses")

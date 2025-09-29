@@ -15,7 +15,7 @@ from pydantic import BaseModel
 import json
 import requests
 from app.database import get_db
-from app.utils.models import GitHubInstallation, GitHubRepository, Organization, User
+from app.utils.models import GitHubInstallation, GitHubRepository, Organization, User, GitHubPullRequestAnalysis
 from app.api.auth import get_current_user
 import uuid
 from uuid import UUID
@@ -23,7 +23,7 @@ from datetime import datetime
 import os
 import logging
 from urllib.parse import unquote
-from app.services.impact_analysis import schema_detection_rag, dbt_model_detection_rag, fetch_queries, store_analysis_result
+from app.services.impact_analysis import schema_detection_rag, dbt_model_detection_rag, fetch_queries, store_analysis_result, store_pr_analysis
 from github import GithubIntegration, Github
 from sqlalchemy import and_
 
@@ -84,6 +84,22 @@ class RepositoryResponse(BaseModel):
     private: bool
     description: str | None
     default_branch: str | None
+    created_at: datetime
+    updated_at: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class PRAAnalysisResponse(BaseModel):
+    id: UUID
+    org_id: UUID
+    installation_id: UUID
+    repository_id: UUID | None
+    repo_full_name: str
+    pr_number: int
+    pr_title: str | None
+    analysis_data: dict
     created_at: datetime
     updated_at: datetime | None
 
@@ -625,7 +641,16 @@ async def github_webhook(request: Request, db=Depends(get_db)):
         comment_text = f"## 🤖 **Impact Analysis Summary**\n\nAnalyzed {len(results)} SQL file(s) for potential downstream impact.\n\n*Analysis generated at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC*\n\n---\n\n{chr(10).join(file_summaries)}"
 
         # Store results
-        analysis_id = store_analysis_result(pr_number, repo_full_name, {"files": results})
+        # New: store results via SQLAlchemy model with relationships
+        analysis_id = store_pr_analysis(
+            db,
+            org_id=str(installation.org_id),
+            installation_id_str=installation_id,
+            repo_full_name=repo_full_name,
+            pr_number=pr_number,
+            pr_title=pr_title,
+            analysis_data={"files": results},
+        )
 
         issue = repo.get_issue(number=pr_number)
         issue.create_comment(comment_text)
@@ -694,3 +719,25 @@ def process_pr_changes(pr_request: PRProcessRequest, current_user: User = Depend
             
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to process PR: {str(e)}")
+
+
+@router.get("/analyses/{analysis_id}", response_model=PRAAnalysisResponse)
+def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Fetch stored PR analysis by its UUID"""
+    try:
+        analysis_uuid = uuid.UUID(analysis_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid analysis ID format")
+
+    analysis = db.query(GitHubPullRequestAnalysis).filter(
+        GitHubPullRequestAnalysis.id == analysis_uuid
+    ).first()
+
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    # Org scoping: the analysis must belong to the user's org
+    if analysis.org_id != current_user.org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    return analysis

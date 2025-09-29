@@ -23,6 +23,10 @@ VECTOR_STORE_DIR = os.getenv("VECTOR_STORE_DIR", "chroma_collection_setup")
 LINEAGE_CSV_PATH = os.getenv("LINEAGE_CSV_PATH", "temp_lineage_data/lineage_output_deep.csv")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
+ 
+# SQLAlchemy models for storing PR analysis in first-class tables
+from sqlalchemy.orm import Session
+from app.utils.models import GitHubPullRequestAnalysis, GitHubRepository, GitHubInstallation
 
 
 embedding = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=GOOGLE_API_KEY)
@@ -138,6 +142,56 @@ def store_analysis_result(pr_number: int, repo_name: str, result: Dict) -> str:
             (analysis_id, pr_number, repo_name, Json(result)),
         )
     return analysis_id
+
+
+def store_pr_analysis(
+    db: Session,
+    *,
+    org_id: str,
+    installation_id_str: str,
+    repo_full_name: str,
+    pr_number: int,
+    pr_title: Optional[str],
+    analysis_data: Dict,
+) -> str:
+    """
+    Persist PR analysis using SQLAlchemy model `GitHubPullRequestAnalysis` and link to
+    related GitHub entities.
+
+    Returns the created analysis UUID as string.
+    """
+    # Resolve installation row (by external installation id string)
+    installation = (
+        db.query(GitHubInstallation)
+        .filter(GitHubInstallation.installation_id == installation_id_str)
+        .first()
+    )
+    if not installation:
+        raise ValueError("Installation not found for storing PR analysis")
+
+    # Try to resolve repository row by full_name under this installation
+    repository = (
+        db.query(GitHubRepository)
+        .filter(
+            GitHubRepository.installation_id == installation.id,
+            GitHubRepository.full_name == repo_full_name,
+        )
+        .first()
+    )
+
+    analysis = GitHubPullRequestAnalysis(
+        org_id=installation.org_id,
+        installation_id=installation.id,
+        repository_id=repository.id if repository else None,
+        repo_full_name=repo_full_name,
+        pr_number=pr_number,
+        pr_title=pr_title,
+        analysis_data=analysis_data,
+    )
+    db.add(analysis)
+    db.commit()
+    db.refresh(analysis)
+    return str(analysis.id)
 
 
 # -----------------------------
