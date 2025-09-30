@@ -4,7 +4,7 @@ from app.database import init_db, SessionLocal
 from app.snowflake_crawler import polling_worker
 from app.utils.models import SnowflakeConnection, SnowflakeJob
 import threading
-from app.api import auth, organizations, snowflake, github, jira, impact
+from app.api import auth, organizations, snowflake, github, jira, impact, dbt_cloud
 import logging
 import sys
 from app.vector_db import init_org_vector_store
@@ -117,6 +117,7 @@ app.include_router(snowflake.router)
 app.include_router(github.router)
 app.include_router(jira.router)
 app.include_router(impact.router)
+app.include_router(dbt_cloud.router)
 
 @app.on_event("startup")
 async def startup_event():

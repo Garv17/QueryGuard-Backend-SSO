@@ -180,6 +180,24 @@ class JiraTicket(Base):
     creator = relationship("User", backref="created_jira_tickets")
 
 
+# dbt Cloud connection model
+
+class DbtCloudConnection(Base):
+    __tablename__ = "dbt_cloud_connections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    connection_name = Column(String(100), nullable=False)
+    api_key = Column(String(255), nullable=False)
+    account_id = Column(String(100), nullable=False)
+    base_url = Column(String(255), nullable=False)  # e.g., https://api.getdbt.com
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", backref="dbt_cloud_connections")
+
 # Snowflake crawler job and audit models
 
 class SnowflakeJob(Base):
