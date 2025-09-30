@@ -198,6 +198,91 @@ class DbtCloudConnection(Base):
     # Relationships
     organization = relationship("Organization", backref="dbt_cloud_connections")
 
+
+# dbt Cloud metadata storage models
+
+class DbtProject(Base):
+    __tablename__ = "dbt_projects"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("dbt_cloud_connections.id"), nullable=False, index=True)
+    project_id = Column(String(100), nullable=False, index=True)
+    account_id = Column(String(100), nullable=False)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    state = Column(String(50), nullable=True)
+    type = Column(String(50), nullable=True)
+    dbt_project_subdirectory = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
+
+    organization = relationship("Organization", backref="dbt_projects")
+
+
+class DbtRun(Base):
+    __tablename__ = "dbt_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("dbt_cloud_connections.id"), nullable=False, index=True)
+    run_id = Column(String(100), nullable=False, index=True)
+    job_id = Column(String(100), nullable=True)
+    account_id = Column(String(100), nullable=True)
+    project_id = Column(String(100), nullable=True)
+    status = Column(String(50), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    duration = Column(String(50), nullable=True)
+    trigger = Column(String(100), nullable=True)
+
+
+class DbtManifestNode(Base):
+    __tablename__ = "dbt_manifest_nodes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("dbt_cloud_connections.id"), nullable=False, index=True)
+    run_id = Column(String(100), nullable=False, index=True)
+    unique_id = Column(String(500), nullable=False, index=True)
+    database = Column(String(200), nullable=True)
+    schema = Column(String(200), nullable=True)
+    name = Column(String(255), nullable=True)
+    package_name = Column(String(255), nullable=True)
+    path = Column(String(500), nullable=True)
+    original_file_path = Column(String(500), nullable=True)
+    resource_type = Column(String(100), nullable=True)
+    raw_code = Column(Text, nullable=True)
+    compiled_code = Column(Text, nullable=True)
+    downstream_models = Column(JSONB, nullable=True)
+    last_successful_run_at = Column(DateTime(timezone=True), nullable=True)
+    synced_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class DbtCrawlAudit(Base):
+    __tablename__ = "dbt_crawl_audit"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("dbt_jobs.id"), nullable=True, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("dbt_cloud_connections.id"), nullable=False, index=True)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(20), nullable=False, default="running")  # running|success|failed
+    nodes_inserted = Column(Integer, nullable=False, default=0)
+    error_message = Column(Text, nullable=True)
+
+
+class DbtJob(Base):
+    __tablename__ = "dbt_jobs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("dbt_cloud_connections.id"), unique=True, nullable=False, index=True)
+    cron_expression = Column(String(100), nullable=False)
+    last_run_time = Column(DateTime(timezone=True), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
 # Snowflake crawler job and audit models
 
 class SnowflakeJob(Base):

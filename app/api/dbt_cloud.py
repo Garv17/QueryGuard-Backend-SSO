@@ -5,9 +5,10 @@ from typing import List
 from pydantic import BaseModel, HttpUrl
 import requests
 from app.database import get_db
-from app.utils.models import DbtCloudConnection, User
+from app.utils.models import DbtCloudConnection, DbtJob, User
 from app.api.auth import get_current_user
 import logging
+from app.services.dbt_crawler import sync_dbt_metadata
 
 
 router = APIRouter(prefix="/dbt-cloud", tags=["dbt Cloud"])
@@ -32,6 +33,10 @@ class DbtCloudConnectionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class DbtScheduleRequest(BaseModel):
+    cron_expression: str
 
 
 def _normalize_base_url(base_url: str) -> str:
@@ -169,5 +174,53 @@ def list_connections(
         .all()
     )
     return rows
+
+
+@router.post("/schedule/{connection_id}")
+def set_schedule(
+    connection_id: str,
+    body: DbtScheduleRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    conn = db.query(DbtCloudConnection).filter(
+        DbtCloudConnection.id == connection_id,
+        DbtCloudConnection.org_id == current_user.org_id,
+        DbtCloudConnection.is_active == True,
+    ).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    job = db.query(DbtJob).filter(DbtJob.connection_id == connection_id).first()
+    if job:
+        job.cron_expression = body.cron_expression
+        job.is_active = True
+        # leave last_run_time unchanged
+    else:
+        # create with last_run_time = NULL to indicate never run
+        job = DbtJob(connection_id=connection_id, cron_expression=body.cron_expression, is_active=True)
+        db.add(job)
+    db.commit()
+    return {"message": "Schedule set", "cron_expression": body.cron_expression}
+
+
+@router.post("/sync/{connection_id}")
+def sync(connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
+    # Ensure connection belongs to org
+    conn = db.query(DbtCloudConnection).filter(
+        DbtCloudConnection.id == connection_id,
+        DbtCloudConnection.org_id == current_user.org_id,
+        DbtCloudConnection.is_active == True,
+    ).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    try:
+        result = sync_dbt_metadata(db, connection_id)
+        return {"message": "Sync completed", **result}
+    except Exception as e:
+        logger.exception("/dbt-cloud/sync failed: %s", str(e))
+        raise HTTPException(status_code=400, detail=f"Sync failed: {str(e)}")
 
 

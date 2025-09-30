@@ -1,7 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db, SessionLocal
-from app.snowflake_crawler import polling_worker
+from app.snowflake_crawler import polling_worker as snowflake_polling_worker
+from app.services.dbt_crawler import polling_worker as dbt_polling_worker
 from app.utils.models import SnowflakeConnection, SnowflakeJob
 import threading
 from app.api import auth, organizations, snowflake, github, jira, impact, dbt_cloud
@@ -137,18 +138,31 @@ async def startup_event():
     # Start background polling worker
     app.state.worker_stop_event = threading.Event()
     app.state.worker_thread = threading.Thread(
-        target=polling_worker, 
+        target=snowflake_polling_worker, 
         args=(app.state.worker_stop_event,), 
         daemon=True,
         name="SnowflakeCrawlerWorker"
     )
     app.state.worker_thread.start()
+    # Start dbt crawler worker
+    app.state.dbt_worker_stop_event = threading.Event()
+    app.state.dbt_worker_thread = threading.Thread(
+        target=dbt_polling_worker,
+        args=(app.state.dbt_worker_stop_event, 30),
+        daemon=True,
+        name="DbtCrawlerWorker"
+    )
+    app.state.dbt_worker_thread.start()
     
     # Verify worker started
     if app.state.worker_thread.is_alive():
         logger.info("🔄 Snowflake crawler worker started")
     else:
         logger.error("❌ Failed to start Snowflake crawler worker")
+    if app.state.dbt_worker_thread.is_alive():
+        logger.info("🔄 dbt crawler worker started")
+    else:
+        logger.error("❌ Failed to start dbt crawler worker")
     
     logger.info("✅ Application startup completed")
 
@@ -167,6 +181,14 @@ async def shutdown_event():
                 logger.warning("⚠️  Worker thread did not stop gracefully")
             else:
                 logger.info("🔄 Snowflake crawler worker stopped")
+    if hasattr(app.state, 'dbt_worker_stop_event'):
+        app.state.dbt_worker_stop_event.set()
+        if hasattr(app.state, 'dbt_worker_thread') and app.state.dbt_worker_thread.is_alive():
+            app.state.dbt_worker_thread.join(timeout=10)
+            if app.state.dbt_worker_thread.is_alive():
+                logger.warning("⚠️  dbt worker thread did not stop gracefully")
+            else:
+                logger.info("🔄 dbt crawler worker stopped")
     
     logger.info("✅ Application shutdown completed")
 
