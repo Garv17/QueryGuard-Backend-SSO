@@ -228,6 +228,7 @@ class SnowflakeQueryRecord(Base):
     database_id = Column(Integer, nullable=True)
     schema_name = Column(String(200), nullable=True)
     schema_id = Column(Integer, nullable=True)
+    query_type = Column(String(50), nullable=True)
     start_time = Column(DateTime(timezone=True), nullable=False)
     end_time = Column(DateTime(timezone=True), nullable=True)
     session_id = Column(BigInteger, nullable=True)
@@ -244,7 +245,6 @@ class InformationSchemacolumns(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
-    batch_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_query_history.batch_id"), nullable=False, index=True)
     connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
     table_catalog = Column(String(200), nullable=True)
     table_schema = Column(String(200), nullable=True)
@@ -256,7 +256,6 @@ class InformationSchemacolumns(Base):
 
     # Relationships
     organization = relationship("Organization", foreign_keys=[org_id], backref="information_schema_columns_org_id")
-    batch = relationship("SnowflakeQueryRecord", foreign_keys=[batch_id], viewonly=True)
     connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="information_schema_columns_conn_id")
 
 class ColumnLevelLineage(Base):
@@ -264,7 +263,7 @@ class ColumnLevelLineage(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
-    batch_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_query_history.batch_id"), nullable=False, index=True)
+    batch_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
     source_database = Column(String(200), nullable=True)
     source_schema = Column(String(200), nullable=True)
@@ -285,7 +284,6 @@ class ColumnLevelLineage(Base):
     
     # Relationships
     organization = relationship("Organization", foreign_keys=[org_id], backref="column_level_lineage_org_id")
-    batch = relationship("SnowflakeQueryRecord", foreign_keys=[batch_id], viewonly=True)
     connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="column_level_lineage_conn_id")
 
 class FilterClauseColumnLineage(Base):
@@ -293,7 +291,7 @@ class FilterClauseColumnLineage(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
-    batch_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_query_history.batch_id"), nullable=False, index=True)
+    batch_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
     source_database = Column(String(200), nullable=True)
     source_schema = Column(String(200), nullable=True)
@@ -314,7 +312,6 @@ class FilterClauseColumnLineage(Base):
     
     # Relationships
     organization = relationship("Organization", foreign_keys=[org_id], backref="filter_clause_column_org_id")
-    batch = relationship("SnowflakeQueryRecord", foreign_keys=[batch_id], viewonly=True)
     connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="filter_clause_column_conn_id")
 
 
@@ -323,14 +320,13 @@ class LineageLoadWatermark(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
-    batch_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_query_history.batch_id"), nullable=False, index=True)
+    batch_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
     last_processed_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
     organization = relationship("Organization", foreign_keys=[org_id], backref="lineage_load_watermark_org_id")
-    batch = relationship("SnowflakeQueryRecord", foreign_keys=[batch_id], viewonly=True)
     connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="lineage_watermarks_conn_id")
       
 

@@ -1,3 +1,10 @@
+import sys
+import os
+# Add the project root to Python path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from sql_lineage_builder import build_lineage
 import logging
 import sqllineage_lineage
@@ -6,7 +13,6 @@ import ast
 import subprocess
 from sqlalchemy import create_engine, text, update, func
 from filter_clause_columns import get_dependent_columns
-import sys
 from sqlalchemy.orm import Session
 import uuid
 from datetime import datetime, timezone
@@ -302,7 +308,7 @@ def insert_lineage(engine, model_class, df: pd.DataFrame, org_id: uuid.UUID, bat
     return 0
 
 
-def main(org_id, conn_id, batch_id):
+def lineage_builder(org_id, conn_id, batch_id):
     try:
         pg_engine = sqllineage_lineage.get_pg_engine()
         fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df, historical_filter_clause_column_lineage_df = sqllineage_lineage.fetch_query_access_history_and_information_schema_columns(pg_engine, org_id, conn_id, batch_id)
@@ -395,13 +401,13 @@ def main(org_id, conn_id, batch_id):
 
             else:
                 inserted_count = insert_lineage(
-                    session, ColumnLevelLineage, consolidated_df, org_id=org_id, batch_id=batch_id, connection_id=conn_id
+                    pg_engine, ColumnLevelLineage, consolidated_df, org_id=org_id, batch_id=batch_id, connection_id=conn_id
                 )
 
                 logger.info(f"Inserted {inserted_count} lineage records into column_level_lineage")
 
                 inserted_count_filter_clause = insert_lineage(
-                    session, FilterClauseColumnLineage, final_filter_clause_df, org_id=org_id, batch_id=batch_id, connection_id=conn_id
+                    pg_engine, FilterClauseColumnLineage, final_filter_clause_df, org_id=org_id, batch_id=batch_id, connection_id=conn_id
                 )
 
                 logger.info(f"Inserted {inserted_count_filter_clause} lineage records into filter_clause_column_lineage")
@@ -418,12 +424,12 @@ def main(org_id, conn_id, batch_id):
                 session.commit()
                 
                 logger.info(f"Updated watermark for batch {batch_id}")
-
-        logger.info(f"No query to process")
+        else:
+            logger.info(f"No lineage to process")
 
     except Exception as e:
         logger.critical("Fatal error in main execution: %s", e)
 
 
 if __name__ == "__main__":
-    main(org_id, conn_id, batch_id)
+    lineage_builder(org_id, conn_id, batch_id)

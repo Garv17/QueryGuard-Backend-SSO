@@ -12,7 +12,14 @@ import ast
 from sqlglot import parse_one, exp
 import logging
 import sys
+import os
 from datetime import datetime
+
+# Add the project root to Python path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from app.utils.models import (
     SnowflakeQueryRecord,
     InformationSchemacolumns,
@@ -57,7 +64,7 @@ def fetch_query_access_history_and_information_schema_columns(engine, org_id, co
         # Fetch information schema columns
         info_schema = (
             session.query(InformationSchemacolumns)
-            .filter_by(connection_id=conn_id, org_id=org_id, batch_id=batch_id)
+            .filter_by(connection_id=conn_id, org_id=org_id)
             .all()
         )
 
@@ -236,7 +243,7 @@ def combine_queries_by_session(df: pd.DataFrame) -> pd.DataFrame:
         combined_df = pd.DataFrame(combined_queries)
         final_df = pd.concat([combined_df, unused_merge_df, unused_insert_df], ignore_index=True)
 
-        final_df['query_start_time'] = final_df['query_start_time'].dt.tz_localize(None)
+        final_df['start_time'] = final_df['start_time'].dt.tz_localize(None)
         return final_df
 
     except Exception as e:

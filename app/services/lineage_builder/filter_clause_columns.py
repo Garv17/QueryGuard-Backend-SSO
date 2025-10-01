@@ -247,7 +247,7 @@ def expand_sources_in_select_to_base(sel, target_col: str, _seen=None):
 
         produced_here = None
         for out_name in outputs:
-            if out_name and out_name.lower() == target_col.lower():
+            if out_name and target_col and out_name.lower() == target_col.lower():
                 produced_here = out_name
                 break
         if not produced_here:
@@ -805,13 +805,13 @@ def get_dependent_columns(df):
 
             # fully_qualified_source_column_name = row['source_database'].lower() + '.' + row['source_schema'].lower() + '.' +row['source_table'].lower() + '.' +row['source_column'].lower()
             fully_qualified_target_column_name = row['target_database'].lower() + '.' + row['target_schema'].lower() + '.' +row['target_table'].lower() + '.' +row['target_column'].lower()
-            sql_query = row['query_text']
-            base_objects_accessed = row['base_objects_accessed']
-            query_id = row['query_id']
-            query_type = row['query_type']
-            session_id = row['session_id']
-            dependency_score = row['dependency_score']
-            dbt_model_file_path = row['dbt_model_file_path']
+            sql_query = row.get('query_text', '')
+            base_objects_accessed = row.get('base_objects_accessed', {})
+            query_id = row.get('query_id', '')
+            query_type = row.get('query_type', 'UNKNOWN')
+            session_id = row.get('session_id', None)
+            dependency_score = row.get('dependency_score', 0)
+            dbt_model_file_path = row.get('dbt_model_file_path', '')
             cleaned_query = detect_and_replace_named_parameters(sql_query, static_value="null")
             result = get_bidirectional_column_lineage(fully_qualified_source_column_name, fully_qualified_target_column_name, cleaned_query)
 

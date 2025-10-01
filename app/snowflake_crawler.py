@@ -180,6 +180,7 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
                 database_id=r.get("database_id"),
                 schema_name=r.get("schema_name"),
                 schema_id=r.get("schema_id"),
+                query_type=r.get("query_type"),
                 start_time=r.get("start_time"),
                 end_time=r.get("end_time"),
                 session_id=r.get("session_id"),
@@ -203,7 +204,6 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
         for c in column_info_rows:
             col_rec = InformationSchemacolumns(
                 org_id=conn.org_id,
-                batch_id=batch_id,
                 connection_id=conn.id,
                 table_catalog=c.get("table_catalog"),
                 table_schema=c.get("table_schema"),
@@ -241,7 +241,7 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
         logger.exception("💥 Crawl failed: %s", str(e))
 
 
-def polling_worker(stop_event: threading.Event, interval_seconds: int = 600):
+def polling_worker(stop_event: threading.Event, interval_seconds: int = 60):
     logger.info("🚀 Starting Snowflake crawler worker (interval: %d seconds)", interval_seconds)
     cycle_count = 0
     
