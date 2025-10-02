@@ -31,13 +31,19 @@ from app.utils.models import (
 # Logging Setup
 logger = logging.getLogger("lineage.sqllineage_lineage")
 
+# Suppress third-party library logging
+logging.getLogger("sqllineage").setLevel(logging.WARNING)
+logging.getLogger("sqlglot").setLevel(logging.WARNING)
+logging.getLogger("sqlglot.lineage").setLevel(logging.WARNING)
+logging.getLogger("sqlglot.optimizer").setLevel(logging.WARNING)
+
 
 # Database connection
 def get_pg_engine():
     try:
         load_dotenv()
         engine = create_engine(
-            os.getenv('POSTGRES_URL')
+            os.getenv('DATABASE_URL')
         )
         return engine
     except Exception as e:

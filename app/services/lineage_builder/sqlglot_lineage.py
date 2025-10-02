@@ -1,4 +1,4 @@
-from _sqlglot_patch import SQLGLOT_PATCHED
+from ._sqlglot_patch import SQLGLOT_PATCHED
 
 import dataclasses
 import functools
@@ -27,27 +27,33 @@ import sqlglot.optimizer.annotate_types
 import sqlglot.optimizer.optimizer
 import sqlglot.optimizer.qualify
 
-from _models import _FrozenModel, _ParserBaseModel, _TableName
-from query_types import get_query_type_of_sql, is_create_table_ddl
-from schema_resolver import SchemaInfo, SchemaResolver, SchemaResolverInterface
-from sql_parsing_common import (
+from ._models import _FrozenModel, _ParserBaseModel, _TableName
+from .query_types import get_query_type_of_sql, is_create_table_ddl
+from .schema_resolver import SchemaInfo, SchemaResolver, SchemaResolverInterface
+from .sql_parsing_common import (
     DIALECTS_WITH_CASE_INSENSITIVE_COLS,
     DIALECTS_WITH_DEFAULT_UPPERCASE_COLS,
     QueryType,
     QueryTypeProps,
 )
-from sqlglot_utils import (
+from .sqlglot_utils import (
     DialectOrStr,
     get_dialect,
     get_query_fingerprint_debug,
     is_dialect_instance,
     parse_statement,
 )
-from ordered_set import OrderedSet
+from .ordered_set import OrderedSet
 
 assert SQLGLOT_PATCHED
 
 logger = logging.getLogger(__name__)
+
+# Suppress third-party library logging
+logging.getLogger("sqllineage").setLevel(logging.WARNING)
+logging.getLogger("sqlglot").setLevel(logging.WARNING)
+logging.getLogger("sqlglot.lineage").setLevel(logging.WARNING)
+logging.getLogger("sqlglot.optimizer").setLevel(logging.WARNING)
 
 Urn = str
 

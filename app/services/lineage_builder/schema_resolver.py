@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional, Protocol, Set, Tuple
 
-from _models import _TableName
+from ._models import _TableName
 
 # A lightweight table schema: column -> type mapping.
 SchemaInfo = Dict[str, str]

@@ -1,9 +1,9 @@
 from typing import Any, Dict, Optional, List, Tuple, Union
 from collections import defaultdict
 
-from schema_resolver import SchemaResolver
-from sqlglot_lineage import SqlParsingResult, sqlglot_lineage
-from sqlglot_utils import get_dialect
+from .schema_resolver import SchemaResolver
+from .sqlglot_lineage import SqlParsingResult, sqlglot_lineage
+from .sqlglot_utils import get_dialect
 import sqlglot
 
 

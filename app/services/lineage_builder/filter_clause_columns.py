@@ -13,6 +13,13 @@ from sqlglot.expressions import (
 
 # Logging Setup
 logger = logging.getLogger("lineage.filter_clause_columns")
+logger.setLevel(logging.INFO)
+
+# Suppress third-party library logging
+logging.getLogger("sqllineage").setLevel(logging.WARNING)
+logging.getLogger("sqlglot").setLevel(logging.WARNING)
+logging.getLogger("sqlglot.lineage").setLevel(logging.WARNING)
+logging.getLogger("sqlglot.optimizer").setLevel(logging.WARNING)
 
 def safe_name(x):
   try:
@@ -504,7 +511,7 @@ def get_bidirectional_column_lineage(
             "source_columns": combined_sources,
             "filters": combined_filters,
         }
-        logger.info(f"Bidirectional lineage result: {result}")
+        # logger.info(f"Bidirectional lineage result: {result}")  # Suppressed verbose logging
         return result
 
     except Exception as e:

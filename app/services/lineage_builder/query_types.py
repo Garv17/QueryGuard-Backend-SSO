@@ -2,8 +2,8 @@ from typing import Optional, Tuple
 
 import sqlglot
 
-from sql_parsing_common import QueryType, QueryTypeProps
-from sqlglot_utils import DialectOrStr, get_dialect, is_dialect_instance
+from .sql_parsing_common import QueryType, QueryTypeProps
+from .sqlglot_utils import DialectOrStr, get_dialect, is_dialect_instance
 
 
 def _is_temp_table(table: sqlglot.exp.Table, dialect: sqlglot.Dialect) -> bool:

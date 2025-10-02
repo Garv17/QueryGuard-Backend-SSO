@@ -18,6 +18,7 @@ from app.utils.models import (
     SnowflakeQueryRecord,
     InformationSchemacolumns
 )
+from app.services.lineage_builder.lineage_builder import lineage_builder
 import snowflake.connector
 
 logger = logging.getLogger("snowflake_crawler")
@@ -231,6 +232,17 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
         audit.finished_at = datetime.now(timezone.utc)
         db.commit()
         
+        # Run lineage builder if data was fetched
+        if len(to_insert) > 0:
+            try:
+                logger.info("🔄 Starting lineage builder for org_id: %s, conn_id: %s, batch_id: %s", 
+                           conn.org_id, conn.id, batch_id)
+                lineage_builder(conn.org_id, conn.id, batch_id)
+                logger.info("✅ Lineage builder completed successfully")
+            except Exception as lineage_error:
+                logger.error("❌ Lineage builder failed: %s", str(lineage_error))
+                # Don't fail the entire crawl if lineage builder fails
+                pass
                    
     except Exception as e:
         db.rollback()

@@ -5,14 +5,14 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from sql_lineage_builder import build_lineage
+from .sql_lineage_builder import build_lineage
 import logging
-import sqllineage_lineage
+from . import sqllineage_lineage
 import pandas as pd
 import ast
 import subprocess
 from sqlalchemy import create_engine, text, update, func
-from filter_clause_columns import get_dependent_columns
+from .filter_clause_columns import get_dependent_columns
 from sqlalchemy.orm import Session
 import uuid
 from datetime import datetime, timezone
@@ -23,7 +23,21 @@ from app.utils.models import (
 )
 
 logger = logging.getLogger("lineage")   # Named logger instead of root
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
+
+# Set all lineage loggers to INFO level to reduce noise
+logging.getLogger("lineage").setLevel(logging.INFO)
+
+# Suppress third-party library logging
+logging.getLogger("sqllineage").setLevel(logging.WARNING)
+logging.getLogger("sqlglot").setLevel(logging.WARNING)
+logging.getLogger("sqlglot.lineage").setLevel(logging.WARNING)
+logging.getLogger("sqlglot.optimizer").setLevel(logging.WARNING)
+logging.getLogger("sqlglot.optimizer.scope").setLevel(logging.WARNING)
+
+# Additional suppression for potential subquery scope messages
+import warnings
+warnings.filterwarnings("ignore", message="Unknown subquery scope")
 
 if not logger.handlers:  # prevent duplicate handlers
     file_handler = logging.FileHandler("lineage.log", mode="a", encoding="utf-8")
@@ -187,90 +201,113 @@ def consolidate_lineage(all_lineages: list, all_edges: list) -> pd.DataFrame:
 
 
 def apply_scd_type2(engine, model_class, current_df: pd.DataFrame, historical_df: pd.DataFrame, org_id: uuid.UUID, batch_id: uuid.UUID, connection_id: uuid.UUID):
-    # Define natural key
-    key_cols = ["org_id", "connection_id", "target_database", "target_schema", "target_table", "target_column"]
+    """
+    SCD Type 2 style update for column-level lineage.
+    """
 
-    # Step 1: Merge to identify existing vs new
+    # Define key columns (unique lineage edge)
+    key_cols = [
+        "org_id", "connection_id",
+        "source_database", "source_schema", "source_table", "source_column",
+        "target_database", "target_schema", "target_table", "target_column"
+    ]
+
+    target_cols = [
+        "org_id", "connection_id",
+        "target_database", "target_schema", "target_table"
+    ]
+
+    current_df[key_cols] = current_df[key_cols].fillna("<<NULL>>")
+    historical_df[key_cols]   = historical_df[key_cols].fillna("<<NULL>>")
+
+    current_targets = current_df[target_cols].drop_duplicates()
+
+    historical_active = historical_df[
+        historical_df.set_index(target_cols).index.isin(current_targets.set_index(target_cols).index)
+    ].copy()
+
+    current_df["is_active"] = 1
+
     merged = current_df.merge(
-        historical_df[key_cols + ["id"]],
+        historical_active[key_cols + ["id"]],
         on=key_cols,
-        how="left",
-        indicator=True
+        how="outer",
+        indicator=True,
+        suffixes=("", "_hist")
     )
 
-    # Rows that already exist (matched keys)
-    existing_records = merged[merged["_merge"] == "both"]
-    # Rows that are completely new
-    new_records = merged[merged["_merge"] == "left_only"]
+    # to deactivate → only in history
+    to_deactivate = merged[merged["_merge"] == "right_only"]
 
-    # Step 2: Deactivate old rows in DB
-    deactivated_count = 0
-    if not existing_records.empty:
-        ids_to_update = existing_records["id"].tolist()
-        with Session(engine) as session:
-            session.execute(
-                update(ColumnLevelLineage)
-                .where(ColumnLevelLineage.id.in_(ids_to_update))
-                .values(is_active=0, updated_at=func.timezone('UTC', func.now()))
+    # to insert → only in current
+    to_insert = merged[merged["_merge"] == "left_only"]
+   # Case: target matches but source cols are NULL (static derivations)
+    # For these, if already exist in history, don't insert duplicate.
+    if not to_insert.empty:
+        null_sources = to_insert[
+            to_insert[["source_database", "source_schema", "source_table", "source_column"]].isnull().all(axis=1)
+        ]
+        if not null_sources.empty:
+            # filter out ones already present in history
+            already_in_history = null_sources.merge(
+                historical_active,
+                on=target_cols + ["target_column"],
+                how="inner"
             )
-            session.commit()
-        deactivated_count = len(ids_to_update)
+            to_insert = pd.concat([
+                to_insert.drop(null_sources.index),
+                null_sources.loc[~null_sources.index.isin(already_in_history.index)]
+            ])
 
-    # Step 3: Prepare rows to insert
-    rows_to_insert_list = []
+    deactivated_count, inserted_count = 0, 0
 
-    # a) Take new versions of existing keys from consolidated_df
-    if not existing_records.empty:
-        updated_records = current_df.merge(
-            existing_records[key_cols],
-            on=key_cols,
-            how="inner"
-        )
-        rows_to_insert_list.append(updated_records)
-
-    # b) Add completely new lineage
-    if not new_records.empty:
-        rows_to_insert_list.append(new_records.drop(columns=["id", "_merge"], errors="ignore"))
-
-    inserted_count = 0
-    if rows_to_insert_list:
-        rows_to_insert = pd.concat(rows_to_insert_list).drop(columns=["id", "_merge"], errors="ignore").copy()
-
-        # set is_active=1
-        rows_to_insert["is_active"] = 1
-
-        # Step 4: Insert via ORM
-        records = rows_to_insert.to_dict(orient="records")
-        with Session(engine) as session:
-            lineage_objects = []
-            for record in records:
-                lineage_objects.append(
-                    model_class(
-                        id=uuid.uuid4(),
-                        org_id=org_id,
-                        batch_id=batch_id,
-                        connection_id=connection_id,
-                        source_database=record.get("source_database"),
-                        source_schema=record.get("source_schema"),
-                        source_table=record.get("source_table"),
-                        source_column=record.get("source_column"),
-                        target_database=record.get("target_database"),
-                        target_schema=record.get("target_schema"),
-                        target_table=record.get("target_table"),
-                        target_column=record.get("target_column"),
-                        query_id=record.get("query_id"),
-                        query_type=record.get("query_type"),
-                        session_id=record.get("session_id"),
-                        dependency_score=record.get("dependency_score"),
-                        dbt_model_file_path=record.get("dbt_model_file_path"),
-                        is_active=record.get("is_active", 1)
-                    )
+    # deactivate old lineage edges
+    if not to_deactivate.empty:
+        ids_to_update = to_deactivate["id"].dropna().tolist()
+        if ids_to_update:
+            with Session(engine) as session:
+                session.execute(
+                    update(model_class)
+                    .where(model_class.id.in_(ids_to_update))
+                    .values(is_active=0, updated_at=func.timezone("UTC", func.now()))
                 )
+                session.commit()
+            deactivated_count = len(ids_to_update)
+
+    # insert new lineage edges
+    if not to_insert.empty:
+        records = to_insert.drop(columns=["id", "_merge"], errors="ignore").to_dict(orient="records")
+        lineage_objects = []
+        for rec in records:
+            lineage_objects.append(
+                model_class(
+                    id=uuid.uuid4(),
+                    org_id=org_id,
+                    batch_id=batch_id,
+                    connection_id=connection_id,
+                    source_database=rec.get("source_database"),
+                    source_schema=rec.get("source_schema"),
+                    source_table=rec.get("source_table"),
+                    source_column=rec.get("source_column"),
+                    target_database=rec.get("target_database"),
+                    target_schema=rec.get("target_schema"),
+                    target_table=rec.get("target_table"),
+                    target_column=rec.get("target_column"),
+                    query_id=rec.get("query_id"),
+                    query_type=rec.get("query_type"),
+                    session_id=rec.get("session_id"),
+                    dependency_score=rec.get("dependency_score"),
+                    dbt_model_file_path=rec.get("dbt_model_file_path"),
+                    is_active=1
+                )
+            )
+        with Session(engine) as session:
             session.bulk_save_objects(lineage_objects)
             session.commit()
         inserted_count = len(records)
 
     return deactivated_count, inserted_count
+
 
 def insert_lineage(engine, model_class, df: pd.DataFrame, org_id: uuid.UUID, batch_id: uuid.UUID, connection_id: uuid.UUID):
  
@@ -310,12 +347,21 @@ def insert_lineage(engine, model_class, df: pd.DataFrame, org_id: uuid.UUID, bat
 
 def lineage_builder(org_id, conn_id, batch_id):
     try:
+        logger.info("Starting lineage_builder with org_id=%s, conn_id=%s, batch_id=%s", org_id, conn_id, batch_id)
         pg_engine = sqllineage_lineage.get_pg_engine()
+        logger.info("PostgreSQL engine created successfully")
+        
         fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df, historical_filter_clause_column_lineage_df = sqllineage_lineage.fetch_query_access_history_and_information_schema_columns(pg_engine, org_id, conn_id, batch_id)
         logger.info("fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved")
+        
         last_processed_at = fetch_query_history_df["created_at"].max()
+        logger.info("Last processed timestamp: %s", last_processed_at)
+        
         final_df = sqllineage_lineage.combine_queries_by_session(fetch_query_history_df)
+        logger.info("Queries combined by session, processing %d sessions", len(final_df))
+        
         final_df['base_objects_accessed'] = final_df['base_objects_accessed'].apply(ast.literal_eval)
+        logger.info("Base objects accessed parsed successfully")
         for query_id, query_text, query_type, session_id, base_objects_accessed, database_name, schema_name in final_df[['query_id', 'query_text', 'query_type', 'session_id', 'base_objects_accessed', 'database_name', 'schema_name']].values:
             try:
                 cleaned_query = sqllineage_lineage.detect_and_replace_named_parameters(query_text, static_value="null")
@@ -332,7 +378,7 @@ def lineage_builder(org_id, conn_id, batch_id):
                     lineage_process = subprocess.run(
                         ["sqllineage", "-e", cleaned_query, "-l", "column", "--dialect=snowflake"],
                         capture_output=True,
-                        text=True
+                        text=True,
                     )
 
                     lineage_output = lineage_process.stdout
@@ -354,7 +400,7 @@ def lineage_builder(org_id, conn_id, batch_id):
                 # Only collect valid lineage
                 if final_lineage and not all(v is None for v in final_lineage.values()):
                     all_lineages.append((final_lineage, query_id, query_type, session_id))
-                    logging.info(f"[{query_id}] Lineage collected.")
+                    # logging.info(f"[{query_id}] Lineage collected.")  # Suppressed verbose logging
 
             except Exception as loop_err:
                 logging.error(f"[{query_id}] Unexpected error while processing query: {loop_err}", exc_info=True)
@@ -362,16 +408,32 @@ def lineage_builder(org_id, conn_id, batch_id):
                 continue
 
 
+        logger.info("Processing lineage consolidation...")
         final_df["query_id"] = final_df["query_id"].apply(
                 lambda x: str(x) if isinstance(x, list) else x
             )
+        logger.info("Query IDs converted to strings")
+        
         consolidated_df = consolidate_lineage(all_lineages, all_edges)
+        logger.info("Lineage consolidated, %d records in consolidated_df", len(consolidated_df))
+        
+        # Add required columns for SCD Type 2 processing
+        if not consolidated_df.empty:
+            consolidated_df["org_id"] = org_id
+            consolidated_df["connection_id"] = conn_id
+            consolidated_df["batch_id"] = batch_id
+            logger.info("Added org_id, connection_id, and batch_id columns to consolidated_df")
+        
         consolidated_df["query_id"] = consolidated_df["query_id"].apply(
                 lambda x: str(x) if isinstance(x, list) else x
             )
+        logger.info("Consolidated query IDs converted to strings")
 
         filter_clause_df = pd.merge(consolidated_df, final_df, on="query_id", how="inner")
+        logger.info("Filter clause DataFrame merged, %d records", len(filter_clause_df))
+        
         rows = get_dependent_columns(filter_clause_df)
+        logger.info("Dependent columns extracted, %d rows", len(rows) if rows else 0)
     
         if rows:
             final_filter_clause_df = pd.DataFrame(rows)
@@ -388,48 +450,71 @@ def lineage_builder(org_id, conn_id, batch_id):
             )
 
             final_filter_clause_df = final_filter_clause_df[mask]
+            
+            # Add required columns for SCD Type 2 processing
+            if not final_filter_clause_df.empty:
+                final_filter_clause_df["org_id"] = org_id
+                final_filter_clause_df["connection_id"] = conn_id
+                final_filter_clause_df["batch_id"] = batch_id
+                logger.info("Added org_id, connection_id, and batch_id columns to final_filter_clause_df")
         else:
             final_filter_clause_df = pd.DataFrame()
 
         if not consolidated_df.empty and not final_filter_clause_df.empty:
-            if not historical_column_level_lineage_df.empty and not historical_filter_clause_column_lineage_df.empty:
-                deactivated_column_level_lineage, inserted_column_level_lineage, = apply_scd_type2(pg_engine, ColumnLevelLineage, consolidated_df, historical_column_level_lineage_df, org_id, batch_id, conn_id)
-                logger.info(f"{deactivated_column_level_lineage} records deactivated in ColumnLevelLineage table, "f"{inserted_column_level_lineage} new records inserted in ColumnLevelLineage table.")
+            try:
+                logger.info("Starting lineage processing...")
+                if not historical_column_level_lineage_df.empty and not historical_filter_clause_column_lineage_df.empty:
+                    logger.info("Processing with SCD Type 2...")
+                    deactivated_column_level_lineage, inserted_column_level_lineage, = apply_scd_type2(pg_engine, ColumnLevelLineage, consolidated_df, historical_column_level_lineage_df, org_id, batch_id, conn_id)
+                    logger.info(f"{deactivated_column_level_lineage} records deactivated in ColumnLevelLineage table, "f"{inserted_column_level_lineage} new records inserted in ColumnLevelLineage table.")
 
-                deactivated_filter_clause_column_lineage, inserted_filter_clause_column_lineage, = apply_scd_type2(pg_engine, FilterClauseColumnLineage, final_filter_clause_df, historical_filter_clause_column_lineage_df, org_id, batch_id, conn_id)
-                logger.info(f"{deactivated_filter_clause_column_lineage} records deactivated in FilterClauseColumnLineage table, "f"{inserted_filter_clause_column_lineage} new records inserted in FilterClauseColumnLineage table.")
+                    deactivated_filter_clause_column_lineage, inserted_filter_clause_column_lineage, = apply_scd_type2(pg_engine, FilterClauseColumnLineage, final_filter_clause_df, historical_filter_clause_column_lineage_df, org_id, batch_id, conn_id)
+                    logger.info(f"{deactivated_filter_clause_column_lineage} records deactivated in FilterClauseColumnLineage table, "f"{inserted_filter_clause_column_lineage} new records inserted in FilterClauseColumnLineage table.")
 
-            else:
-                inserted_count = insert_lineage(
-                    pg_engine, ColumnLevelLineage, consolidated_df, org_id=org_id, batch_id=batch_id, connection_id=conn_id
-                )
+                else:
+                    logger.info("Processing with direct insert...")
+                    inserted_count = insert_lineage(
+                        pg_engine, ColumnLevelLineage, consolidated_df, org_id=org_id, batch_id=batch_id, connection_id=conn_id
+                    )
 
-                logger.info(f"Inserted {inserted_count} lineage records into column_level_lineage")
+                    logger.info(f"Inserted {inserted_count} lineage records into column_level_lineage")
 
-                inserted_count_filter_clause = insert_lineage(
-                    pg_engine, FilterClauseColumnLineage, final_filter_clause_df, org_id=org_id, batch_id=batch_id, connection_id=conn_id
-                )
+                    inserted_count_filter_clause = insert_lineage(
+                        pg_engine, FilterClauseColumnLineage, final_filter_clause_df, org_id=org_id, batch_id=batch_id, connection_id=conn_id
+                    )
 
-                logger.info(f"Inserted {inserted_count_filter_clause} lineage records into filter_clause_column_lineage")
+                    logger.info(f"Inserted {inserted_count_filter_clause} lineage records into filter_clause_column_lineage")
 
-
-            with Session(pg_engine) as session:
-                watermark = LineageLoadWatermark(
-                org_id=org_id,
-                connection_id=conn_id,
-                batch_id=batch_id,
-                last_processed_at=last_processed_at
-                )
-                session.add(watermark)
-                session.commit()
-                
-                logger.info(f"Updated watermark for batch {batch_id}")
+                logger.info("Creating watermark...")
+                with Session(pg_engine) as session:
+                    watermark = LineageLoadWatermark(
+                        org_id=org_id,
+                        connection_id=conn_id,
+                        batch_id=batch_id,
+                        last_processed_at=last_processed_at
+                    )
+                    session.add(watermark)
+                    session.commit()
+                    
+                    logger.info(f"Updated watermark for batch {batch_id}")
+                logger.info("Lineage processing completed successfully")
+            except Exception as lineage_error:
+                logger.error("Error during lineage processing: %s", lineage_error)
+                import traceback
+                logger.error("Lineage processing traceback: %s", traceback.format_exc())
+                raise
         else:
             logger.info(f"No lineage to process")
 
     except Exception as e:
+        import traceback
         logger.critical("Fatal error in main execution: %s", e)
+        logger.critical("Full traceback: %s", traceback.format_exc())
+        raise
 
 
 if __name__ == "__main__":
+    org_id = "76d33fb3-6062-456b-a211-4aec9971f8be"
+    conn_id = "db7cb2cf-bea2-4c52-8c82-62ce6e317afc"
+    batch_id = "1d9ff3b3-5006-4401-a034-e0cce59fc130"
     lineage_builder(org_id, conn_id, batch_id)

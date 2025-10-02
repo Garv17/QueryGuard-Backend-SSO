@@ -7,7 +7,7 @@ import sqlglot
 import sqlglot.errors
 import sqlglot.optimizer.eliminate_ctes
 
-from fingerprint_utils import generate_hash
+from .fingerprint_utils import generate_hash
 
 logger = logging.getLogger(__name__)
 DialectOrStr = Union[sqlglot.Dialect, str]
