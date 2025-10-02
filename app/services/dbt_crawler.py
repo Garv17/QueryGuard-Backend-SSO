@@ -18,6 +18,7 @@ from app.utils.models import (
     DbtCrawlAudit,
 )
 from app.database import SessionLocal
+from sqlalchemy import text
 
 logger = logging.getLogger("dbt_crawler")
 
@@ -72,6 +73,65 @@ def _extract_manifest_nodes(manifest: dict, run_id: str, finished_at: Optional[s
                 "last_successful_run_at": finished_at,
             })
     return rows
+
+
+def _update_lineage_with_dbt_paths(db: Session, org_id: str) -> dict:
+    """Match dbt manifest nodes with column_level_lineage and update dbt_model_file_path."""
+    # Check if column_level_lineage has any data
+    lineage_count = db.execute(text("SELECT COUNT(*) FROM column_level_lineage WHERE org_id = :org_id"), {"org_id": org_id}).scalar()
+    if lineage_count == 0:
+        logger.info("No data found in column_level_lineage for org %s", org_id)
+        return {"matched": 0, "updated": 0, "total_lineage": 0}
+    
+    logger.info("Found %d rows in column_level_lineage for org %s", lineage_count, org_id)
+    
+    # Get all dbt manifest nodes for this org
+    dbt_nodes = db.query(DbtManifestNode).filter(
+        DbtManifestNode.org_id == org_id,
+        DbtManifestNode.database.isnot(None),
+        DbtManifestNode.schema.isnot(None),
+        DbtManifestNode.name.isnot(None),
+        DbtManifestNode.original_file_path.isnot(None)
+    ).all()
+    
+    if not dbt_nodes:
+        logger.info("No dbt manifest nodes found with required fields for org %s", org_id)
+        return {"matched": 0, "updated": 0, "total_lineage": lineage_count}
+    
+    logger.info("Found %d dbt manifest nodes for matching", len(dbt_nodes))
+    
+    matched_count = 0
+    updated_count = 0
+    
+    for node in dbt_nodes:
+        # Match by case-insensitive database, schema, table
+        result = db.execute(text("""
+            UPDATE column_level_lineage 
+            SET dbt_model_file_path = :file_path
+            WHERE org_id = :org_id 
+            AND LOWER(target_database) = LOWER(:database)
+            AND LOWER(target_schema) = LOWER(:schema) 
+            AND LOWER(target_table) = LOWER(:table)
+            AND (dbt_model_file_path IS NULL OR dbt_model_file_path != :file_path)
+        """), {
+            "org_id": org_id,
+            "database": node.database,
+            "schema": node.schema,
+            "table": node.name,
+            "file_path": node.original_file_path
+        })
+        
+        if result.rowcount > 0:
+            matched_count += 1
+            updated_count += result.rowcount
+            logger.info("Matched dbt node %s (%s.%s.%s) -> %d lineage rows updated with path: %s", 
+                       node.unique_id, node.database, node.schema, node.name, 
+                       result.rowcount, node.original_file_path)
+    
+    logger.info("Lineage update completed: %d dbt nodes matched, %d total lineage rows updated", 
+               matched_count, updated_count)
+    
+    return {"matched": matched_count, "updated": updated_count, "total_lineage": lineage_count}
 
 
 def sync_dbt_metadata(db: Session, connection_id: str, job_id: Optional[str] = None) -> dict:
@@ -161,8 +221,18 @@ def sync_dbt_metadata(db: Session, connection_id: str, job_id: Optional[str] = N
 
     audit.finished_at = datetime.now(timezone.utc)
     db.commit()
+    
+    # Update lineage with dbt file paths
+    lineage_result = _update_lineage_with_dbt_paths(db, org_id)
+    
     count = db.query(DbtManifestNode).filter(and_(DbtManifestNode.org_id == org_id, DbtManifestNode.connection_id == connection_id)).count()
-    return {"nodes": count, "picked_run_id": last_success.get("id") if last_success else None}
+    return {
+        "nodes": count, 
+        "picked_run_id": last_success.get("id") if last_success else None,
+        "lineage_matched": lineage_result["matched"],
+        "lineage_updated": lineage_result["updated"],
+        "total_lineage": lineage_result["total_lineage"]
+    }
 
 
 def _due_to_run(cron_expr: str, base_dt: datetime, now: datetime) -> bool:
