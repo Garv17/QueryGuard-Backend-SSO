@@ -26,11 +26,63 @@ DATABASE_URL = os.getenv("DATABASE_URL")
  
 # SQLAlchemy models for storing PR analysis in first-class tables
 from sqlalchemy.orm import Session
-from app.utils.models import GitHubPullRequestAnalysis, GitHubRepository, GitHubInstallation
+from app.utils.models import GitHubPullRequestAnalysis, GitHubRepository, GitHubInstallation, DbtManifestNode
 
 
 embedding = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=GOOGLE_API_KEY)
 LLM = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=GOOGLE_API_KEY, temperature=0.2)
+
+
+def get_model_metadata(db: Session, file_path: str, org_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve dbt model metadata from the dbt_manifest_node table by file path.
+    
+    Args:
+        db: SQLAlchemy database session
+        file_path: The original file path to search for
+        org_id: Organization ID to filter by
+        
+    Returns:
+        Dictionary containing the model metadata if found, None otherwise
+    """
+    try:
+        # Validate input parameters
+        if not file_path or not org_id:
+            logger.warning(f"Invalid parameters: file_path={file_path}, org_id={org_id}")
+            return None
+        
+        # Query the dbt_manifest_node table for the specific file path and org
+        node = db.query(DbtManifestNode).filter(
+            DbtManifestNode.org_id == org_id,
+            DbtManifestNode.original_file_path == file_path
+        ).first()
+        
+        if node:
+            # Convert the SQLAlchemy model to a dictionary
+            return {
+                "id": str(node.id),
+                "org_id": str(node.org_id),
+                "connection_id": str(node.connection_id),
+                "run_id": node.run_id,
+                "unique_id": node.unique_id,
+                "database": node.database,
+                "schema": node.schema,
+                "name": node.name,
+                "package_name": node.package_name,
+                "path": node.path,
+                "original_file_path": node.original_file_path,
+                "resource_type": node.resource_type,
+                "raw_code": node.raw_code,
+                "compiled_code": node.compiled_code,
+                "downstream_models": node.downstream_models,
+                "last_successful_run_at": node.last_successful_run_at.isoformat() if node.last_successful_run_at else None,
+                "synced_at": node.synced_at.isoformat() if node.synced_at else None
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Error retrieving model metadata for file_path {file_path}: {str(e)}")
+        return None
+
 
 # # We are assuming that we have created a vector sotre 
 # def init_vector_store() -> Chroma:
@@ -109,39 +161,12 @@ def fetch_queries(query_ids: List[str]) -> List[Dict]:
         placeholders = ",".join(["%s"] * len(query_ids))
         cursor.execute(
             f"""
-            SELECT query_id, query_text FROM "QUERY_ACCESS_HISTORY_DEEP"
+            SELECT query_id, query_text FROM "snowflake_query_history"
             WHERE query_id IN ({placeholders})
         """,
             query_ids,
         )
         return cursor.fetchall()
-
-
-def store_analysis_result(pr_number: int, repo_name: str, result: Dict) -> str:
-    analysis_id = f"pr_{repo_name.replace('/', '_')}_{pr_number}_{int(datetime.now().timestamp())}"
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS pr_analysis_results (
-                id SERIAL PRIMARY KEY,
-                analysis_id VARCHAR(255) UNIQUE,
-                pr_number INTEGER,
-                repo_name TEXT,
-                analysis_data JSONB,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """
-        )
-        cursor.execute(
-            """
-            INSERT INTO pr_analysis_results (analysis_id, pr_number, repo_name, analysis_data)
-            VALUES (%s, %s, %s, %s)
-        """,
-            (analysis_id, pr_number, repo_name, Json(result)),
-        )
-    return analysis_id
 
 
 def store_pr_analysis(
@@ -530,20 +555,9 @@ def schema_detection_rag(change_text: str, org_id: str, cfg: Optional[IterativeC
     return final_json_response
 
 
-def dbt_model_detection_rag(code_changes: str, file_path: str, org_id: str, cfg: Optional[IterativeConfig] = None):
-    # Placeholder for dbt_conn
-    try:
-        import dbt_connector_temp as dbt_conn  # type: ignore
-    except Exception:
-        dbt_conn = None
-
+def dbt_model_detection_rag(code_changes: str, file_path: str, org_id: str, db: Session, cfg: Optional[IterativeConfig] = None):
     def get_dbt_impact(code_changes_inner: str, file_path_inner: str):
-        model_metadata = None
-        if dbt_conn:
-            try:
-                model_metadata = dbt_conn.get_model_metadata(file_path=file_path_inner)
-            except Exception:
-                model_metadata = None
+        model_metadata = get_model_metadata(db, file_path_inner, org_id)
         query = f"""You are DBT model specialised anlayser. You are provided with these things:
         1) Change in dbt model, basically diff text like this (below is just example of how we get the diff text)
         Example :

@@ -23,7 +23,7 @@ from datetime import datetime
 import os
 import logging
 from urllib.parse import unquote
-from app.services.impact_analysis import schema_detection_rag, dbt_model_detection_rag, fetch_queries, store_analysis_result, store_pr_analysis
+from app.services.impact_analysis import schema_detection_rag, dbt_model_detection_rag, fetch_queries, store_pr_analysis
 from github import GithubIntegration, Github
 from sqlalchemy import and_
 
@@ -603,7 +603,7 @@ async def github_webhook(request: Request, db=Depends(get_db)):
                 f"File: {c['filename']} ({c['status']}) [+{c['additions']}/-{c['deletions']}]\n{c['patch']}"
             )
             if c["filename"].endswith(".sql") and "models/" in c["filename"]:
-                analysis_result = dbt_model_detection_rag(full_diff, c["filename"], str(installation.org_id))  # DBT model path
+                analysis_result = dbt_model_detection_rag(full_diff, c["filename"], str(installation.org_id), db)  # DBT model path
             else:
                 analysis_result = schema_detection_rag(full_diff, str(installation.org_id))
 

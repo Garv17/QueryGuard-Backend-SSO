@@ -5,10 +5,10 @@ from app.snowflake_crawler import polling_worker as snowflake_polling_worker
 from app.services.dbt_crawler import polling_worker as dbt_polling_worker
 from app.utils.models import SnowflakeConnection, SnowflakeJob
 import threading
-from app.api import auth, organizations, snowflake, github, jira, impact, dbt_cloud
+from app.api import auth, organizations, snowflake, github, jira, impact, dbt_cloud, chat
 import logging
 import sys
-from app.vector_db import init_org_vector_store
+from app.vector_db import upsert_lineage_embeddings
 from sqlalchemy import or_
 logging.basicConfig(
     level=logging.INFO,
@@ -119,6 +119,7 @@ app.include_router(github.router)
 app.include_router(jira.router)
 app.include_router(impact.router)
 app.include_router(dbt_cloud.router)
+app.include_router(chat.router)
 
 @app.on_event("startup")
 async def startup_event():
@@ -128,9 +129,9 @@ async def startup_event():
     # Initialize database
     init_db()
     logger.info("📊 Database initialized")
-    ## Temporary vector database initialization for intelytics org
-    DB = init_org_vector_store("76d33fb3-6062-456b-a211-4aec9971f8be", "temp_lineage_data/lineage_output_deep.csv")
-    logger.info("Vector database initialized for intelytics org")
+    ## Initialize vector database for intelytics org from column_level_lineage table
+    upsert_lineage_embeddings(org_id="76d33fb3-6062-456b-a211-4aec9971f8be")
+    logger.info("Vector database initialized from column_level_lineage for intelytics org")
     
     # Sync jobs with connections
     sync_jobs_with_connections()
