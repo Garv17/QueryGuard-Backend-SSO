@@ -217,9 +217,6 @@ def apply_scd_type2(engine, model_class, current_df: pd.DataFrame, historical_df
         "target_database", "target_schema", "target_table"
     ]
 
-    current_df[key_cols] = current_df[key_cols].fillna("<<NULL>>")
-    historical_df[key_cols]   = historical_df[key_cols].fillna("<<NULL>>")
-
     current_targets = current_df[target_cols].drop_duplicates()
 
     historical_active = historical_df[
