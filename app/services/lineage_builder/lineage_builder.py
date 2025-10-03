@@ -1,5 +1,6 @@
 import sys
 import os
+import numpy as np
 # Add the project root to Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 if project_root not in sys.path:
@@ -211,11 +212,18 @@ def apply_scd_type2(engine, model_class, current_df: pd.DataFrame, historical_df
         "source_database", "source_schema", "source_table", "source_column",
         "target_database", "target_schema", "target_table", "target_column"
     ]
-
+    
     target_cols = [
         "org_id", "connection_id",
         "target_database", "target_schema", "target_table"
     ]
+
+    historical_df = historical_df.where(pd.notnull(historical_df), np.nan)
+
+    current_df['org_id'] = current_df['org_id'].astype(str)
+    current_df['connection_id'] = current_df['connection_id'].astype(str)
+    historical_df['org_id'] = historical_df['org_id'].astype(str)
+    historical_df['connection_id'] = historical_df['connection_id'].astype(str)
 
     current_targets = current_df[target_cols].drop_duplicates()
 
@@ -510,8 +518,8 @@ def lineage_builder(org_id, conn_id, batch_id):
         raise
 
 
-if __name__ == "__main__":
-    org_id = "76d33fb3-6062-456b-a211-4aec9971f8be"
-    conn_id = "db7cb2cf-bea2-4c52-8c82-62ce6e317afc"
-    batch_id = "1d9ff3b3-5006-4401-a034-e0cce59fc130"
-    lineage_builder(org_id, conn_id, batch_id)
+# if __name__ == "__main__":
+#     org_id = "76d33fb3-6062-456b-a211-4aec9971f8be"
+#     conn_id = "db7cb2cf-bea2-4c52-8c82-62ce6e317afc"
+#     batch_id = "a0bc87cb-98c4-4198-8608-a417f0dd4fa8"
+#     lineage_builder(org_id, conn_id, batch_id)
