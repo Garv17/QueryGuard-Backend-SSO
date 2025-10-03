@@ -1003,3 +1003,45 @@ sqlalchemy.exc.ArgumentError: Expected string or URL object, got None
 2025-10-03 14:51:01,687 - INFO - Creating watermark...
 2025-10-03 14:51:02,402 - INFO - Updated watermark for batch f5f38031-1c5d-4cdd-8766-c874e880abd5
 2025-10-03 14:51:02,403 - INFO - Lineage processing completed successfully
+2025-10-03 15:24:49,633 - INFO - Starting lineage_builder with org_id=76d33fb3-6062-456b-a211-4aec9971f8be, conn_id=db7cb2cf-bea2-4c52-8c82-62ce6e317afc, batch_id=5f6b69c7-e1bc-45ae-8493-61dd1ca04768
+2025-10-03 15:24:49,639 - INFO - PostgreSQL engine created successfully
+2025-10-03 15:24:57,983 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 15:24:57,987 - INFO - Last processed timestamp: 2025-10-03 09:54:41.326132+00:00
+2025-10-03 15:24:58,018 - INFO - Queries combined by session, processing 1 sessions
+2025-10-03 15:24:58,018 - INFO - Base objects accessed parsed successfully
+2025-10-03 15:24:58,073 - INFO - Processing lineage consolidation...
+2025-10-03 15:24:58,073 - INFO - Query IDs converted to strings
+2025-10-03 15:24:58,075 - INFO - Lineage consolidated, 21 records in consolidated_df
+2025-10-03 15:24:58,075 - INFO - Added org_id, connection_id, and batch_id columns to consolidated_df
+2025-10-03 15:24:58,076 - INFO - Consolidated query IDs converted to strings
+2025-10-03 15:24:58,080 - INFO - Filter clause DataFrame merged, 21 records
+2025-10-03 15:24:58,426 - INFO - Dependent columns extracted, 48 rows
+2025-10-03 15:24:58,427 - INFO - Added org_id, connection_id, and batch_id columns to final_filter_clause_df
+2025-10-03 15:24:58,428 - INFO - Starting lineage processing...
+2025-10-03 15:24:58,428 - INFO - Processing with direct insert...
+2025-10-03 15:25:00,422 - INFO - Inserted 21 lineage records into column_level_lineage
+2025-10-03 15:25:01,322 - INFO - Inserted 43 lineage records into filter_clause_column_lineage
+2025-10-03 15:25:01,323 - INFO - Creating watermark...
+2025-10-03 15:25:02,067 - INFO - Updated watermark for batch 5f6b69c7-e1bc-45ae-8493-61dd1ca04768
+2025-10-03 15:25:02,068 - INFO - Lineage processing completed successfully
+2025-10-03 15:30:48,997 - INFO - Starting lineage_builder with org_id=76d33fb3-6062-456b-a211-4aec9971f8be, conn_id=db7cb2cf-bea2-4c52-8c82-62ce6e317afc, batch_id=8b013b0f-1748-4716-af0e-b377684abee0
+2025-10-03 15:30:49,006 - INFO - PostgreSQL engine created successfully
+2025-10-03 15:31:01,695 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 15:31:01,696 - INFO - Last processed timestamp: 2025-10-03 10:00:41.370876+00:00
+2025-10-03 15:31:01,715 - INFO - Queries combined by session, processing 2 sessions
+2025-10-03 15:31:01,715 - INFO - Base objects accessed parsed successfully
+2025-10-03 15:31:01,772 - INFO - Processing lineage consolidation...
+2025-10-03 15:31:01,772 - INFO - Query IDs converted to strings
+2025-10-03 15:31:01,773 - INFO - Lineage consolidated, 41 records in consolidated_df
+2025-10-03 15:31:01,774 - INFO - Added org_id, connection_id, and batch_id columns to consolidated_df
+2025-10-03 15:31:01,774 - INFO - Consolidated query IDs converted to strings
+2025-10-03 15:31:01,775 - INFO - Filter clause DataFrame merged, 41 records
+2025-10-03 15:31:02,298 - INFO - Dependent columns extracted, 48 rows
+2025-10-03 15:31:02,299 - INFO - Added org_id, connection_id, and batch_id columns to final_filter_clause_df
+2025-10-03 15:31:02,299 - INFO - Starting lineage processing...
+2025-10-03 15:31:02,299 - INFO - Processing with SCD Type 2...
+2025-10-03 15:31:03,472 - INFO - 0 records deactivated in ColumnLevelLineage table, 20 new records inserted in ColumnLevelLineage table.
+2025-10-03 15:31:03,482 - INFO - 0 records deactivated in FilterClauseColumnLineage table, 0 new records inserted in FilterClauseColumnLineage table.
+2025-10-03 15:31:03,482 - INFO - Creating watermark...
+2025-10-03 15:31:04,487 - INFO - Updated watermark for batch 8b013b0f-1748-4716-af0e-b377684abee0
+2025-10-03 15:31:04,488 - INFO - Lineage processing completed successfully

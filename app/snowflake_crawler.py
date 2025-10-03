@@ -16,10 +16,12 @@ from app.utils.models import (
     SnowflakeSchema,
     SnowflakeCrawlAudit,
     SnowflakeQueryRecord,
-    InformationSchemacolumns
+    InformationSchemacolumns,
+    ColumnLevelLineage
 )
 from app.services.lineage_builder.lineage_builder import lineage_builder
 import snowflake.connector
+from app.vector_db import upsert_lineage_embeddings_by_batch
 
 logger = logging.getLogger("snowflake_crawler")
 
@@ -239,6 +241,53 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
                            conn.org_id, conn.id, batch_id)
                 lineage_builder(conn.org_id, conn.id, batch_id)
                 logger.info("✅ Lineage builder completed successfully")
+
+                # --- Vector embeddings sync for this batch ---
+                try:
+                    # Count active/inactive lineage rows for this batch
+                    active_count = db.query(ColumnLevelLineage).filter(
+                        ColumnLevelLineage.org_id == conn.org_id,
+                        ColumnLevelLineage.connection_id == conn.id,
+                        ColumnLevelLineage.batch_id == batch_id,
+                        ColumnLevelLineage.is_active == 1,
+                    ).count()
+
+                    inactive_count = db.query(ColumnLevelLineage).filter(
+                        ColumnLevelLineage.org_id == conn.org_id,
+                        ColumnLevelLineage.connection_id == conn.id,
+                        ColumnLevelLineage.batch_id == batch_id,
+                        ColumnLevelLineage.is_active == 0,
+                    ).count()
+
+                    collection_name = f"org_{conn.org_id}"
+                    logger.info(
+                        "🧠 Starting embedding upsert for collection=%s org_id=%s batch_id=%s (active=%d, inactive=%d)",
+                        collection_name,
+                        conn.org_id,
+                        batch_id,
+                        active_count,
+                        inactive_count,
+                    )
+
+                    # Perform upsert + delete by batch
+                    upsert_lineage_embeddings_by_batch(
+                        org_id=str(conn.org_id),
+                        batch_id=str(batch_id),
+                    )
+
+                    logger.info(
+                        "✅ Embedding sync completed for collection=%s org_id=%s batch_id=%s",
+                        collection_name,
+                        conn.org_id,
+                        batch_id,
+                    )
+                except Exception as embed_err:
+                    logger.error(
+                        "❌ Embedding sync failed for org_id=%s batch_id=%s: %s",
+                        conn.org_id,
+                        batch_id,
+                        str(embed_err),
+                    )
             except Exception as lineage_error:
                 logger.error("❌ Lineage builder failed: %s", str(lineage_error))
                 # Don't fail the entire crawl if lineage builder fails

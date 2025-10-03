@@ -130,8 +130,8 @@ async def startup_event():
     init_db()
     logger.info("📊 Database initialized")
     ## Initialize vector database for intelytics org from column_level_lineage table
-    upsert_lineage_embeddings(org_id="76d33fb3-6062-456b-a211-4aec9971f8be")
-    logger.info("Vector database initialized from column_level_lineage for intelytics org")
+    # upsert_lineage_embeddings(org_id="76d33fb3-6062-456b-a211-4aec9971f8be")
+    # logger.info("Vector database initialized from column_level_lineage for intelytics org")
     
     # Sync jobs with connections
     sync_jobs_with_connections()
