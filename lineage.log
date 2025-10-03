@@ -1,0 +1,1005 @@
+2025-10-03 12:08:13,648 - ERROR - Failed to create database engine: Expected string or URL object, got None
+Traceback (most recent call last):
+  File "/Users/deepkatbamna/Desktop/query_guard/QueryGuard-Backend/app/services/lineage_builder/sqllineage_lineage.py", line 39, in get_pg_engine
+    engine = create_engine(
+             ^^^^^^^^^^^^^^
+  File "<string>", line 2, in create_engine
+  File "/Users/deepkatbamna/Desktop/query_guard/QueryGuard-Backend/.venv/lib/python3.12/site-packages/sqlalchemy/util/deprecations.py", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File "/Users/deepkatbamna/Desktop/query_guard/QueryGuard-Backend/.venv/lib/python3.12/site-packages/sqlalchemy/engine/create.py", line 564, in create_engine
+    u = _url.make_url(url)
+        ^^^^^^^^^^^^^^^^^^
+  File "/Users/deepkatbamna/Desktop/query_guard/QueryGuard-Backend/.venv/lib/python3.12/site-packages/sqlalchemy/engine/url.py", line 860, in make_url
+    raise exc.ArgumentError(
+sqlalchemy.exc.ArgumentError: Expected string or URL object, got None
+2025-10-03 12:08:13,667 - CRITICAL - Fatal error in main execution: Expected string or URL object, got None
+2025-10-03 12:12:47,042 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 12:12:48,269 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf6af6-3201-fad8-0010-15ba00032ace
+2025-10-03 12:12:48,836 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf6b3f-3201-fa73-0010-15ba00034306
+2025-10-03 12:12:49,431 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf74d7-3201-fad1-0010-15ba0003324e
+2025-10-03 12:12:50,562 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf74f5-3201-fbe2-0010-15ba0003606e
+2025-10-03 12:12:51,167 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf750b-3201-fbe2-0010-15ba00036096
+2025-10-03 12:12:51,746 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf750f-3201-fbe2-0010-15ba000360aa
+2025-10-03 12:12:51,759 - DEBUG - Expanded allocationrulekey -> {'agg.period_month', 'agg.PROD_TZ', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:12:51,759 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.period_month', 'agg.PROD_TZ', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:12:51,759 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,760 - DEBUG - Forward lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,764 - DEBUG - Expanded allocationrulekey -> {'agg.period_month', 'agg.PROD_TZ', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:12:51,764 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.period_month', 'agg.PROD_TZ', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:12:51,764 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,764 - DEBUG - Reverse lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,764 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,764 - INFO - Bidirectional lineage result: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,776 - DEBUG - Expanded allocationrulekey -> {'agg.period_month', 'agg.PROD_TZ', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:12:51,776 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.period_month', 'agg.PROD_TZ', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:12:51,777 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,777 - DEBUG - Forward lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,781 - DEBUG - Expanded deptcd -> set()
+2025-10-03 12:12:51,782 - DEBUG - expand_all_occurrences for deptcd -> set()
+2025-10-03 12:12:51,782 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,782 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:51,782 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,782 - INFO - Bidirectional lineage result: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,798 - DEBUG - Expanded allocationrulekey -> {'agg.period_month', 'agg.PROD_TZ', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:12:51,798 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.period_month', 'agg.PROD_TZ', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:12:51,798 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,798 - DEBUG - Forward lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,802 - DEBUG - Expanded perioddate -> set()
+2025-10-03 12:12:51,803 - DEBUG - expand_all_occurrences for perioddate -> set()
+2025-10-03 12:12:51,803 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,803 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:51,803 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,803 - INFO - Bidirectional lineage result: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,820 - DEBUG - Expanded allocationruledesc -> set()
+2025-10-03 12:12:51,820 - DEBUG - expand_all_occurrences for allocationruledesc -> set()
+2025-10-03 12:12:51,820 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,820 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,824 - DEBUG - Expanded deptcd -> set()
+2025-10-03 12:12:51,825 - DEBUG - expand_all_occurrences for deptcd -> set()
+2025-10-03 12:12:51,825 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,825 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:51,825 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,825 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,840 - DEBUG - Expanded operationordergroup -> set()
+2025-10-03 12:12:51,841 - DEBUG - expand_all_occurrences for operationordergroup -> set()
+2025-10-03 12:12:51,841 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,841 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,846 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:51,846 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,847 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:51,847 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,847 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,859 - DEBUG - Expanded fundlist -> set()
+2025-10-03 12:12:51,859 - DEBUG - expand_all_occurrences for fundlist -> set()
+2025-10-03 12:12:51,859 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,859 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,864 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:51,864 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,864 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:51,864 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,864 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,876 - DEBUG - Expanded departmentlist -> {'source_data.deptcd'}
+2025-10-03 12:12:51,877 - DEBUG - Expanded departmentlist -> set()
+2025-10-03 12:12:51,877 - DEBUG - expand_all_occurrences for departmentlist -> {'source_data.deptcd'}
+2025-10-03 12:12:51,877 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,877 - DEBUG - Forward lineage: {'source_columns': ['source_data.deptcd'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,881 - DEBUG - Expanded deptcd -> set()
+2025-10-03 12:12:51,882 - DEBUG - expand_all_occurrences for deptcd -> set()
+2025-10-03 12:12:51,882 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,882 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:51,882 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,882 - INFO - Bidirectional lineage result: {'source_columns': ['source_data.deptcd'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,898 - DEBUG - Expanded marketlist -> set()
+2025-10-03 12:12:51,899 - DEBUG - expand_all_occurrences for marketlist -> set()
+2025-10-03 12:12:51,899 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,899 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,904 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:51,904 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,904 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:51,904 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,904 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,916 - DEBUG - Expanded accountlist -> set()
+2025-10-03 12:12:51,916 - DEBUG - expand_all_occurrences for accountlist -> set()
+2025-10-03 12:12:51,916 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,916 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,921 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:51,921 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,921 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:51,921 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,921 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,934 - DEBUG - Expanded accountfrom -> set()
+2025-10-03 12:12:51,934 - DEBUG - expand_all_occurrences for accountfrom -> set()
+2025-10-03 12:12:51,934 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,934 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,939 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:51,939 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,939 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:51,939 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,939 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,952 - DEBUG - Expanded accountto -> set()
+2025-10-03 12:12:51,953 - DEBUG - expand_all_occurrences for accountto -> set()
+2025-10-03 12:12:51,953 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,953 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,957 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:51,957 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,957 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:51,957 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,957 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,970 - DEBUG - Expanded propertyallocation -> set()
+2025-10-03 12:12:51,970 - DEBUG - expand_all_occurrences for propertyallocation -> set()
+2025-10-03 12:12:51,970 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,970 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,975 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:51,975 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,975 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:51,975 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,975 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,987 - DEBUG - Expanded allocationtype -> set()
+2025-10-03 12:12:51,988 - DEBUG - expand_all_occurrences for allocationtype -> set()
+2025-10-03 12:12:51,988 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,988 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:51,992 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:51,992 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:51,992 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:51,992 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:51,992 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,005 - DEBUG - Expanded personnelandotherservices -> set()
+2025-10-03 12:12:52,005 - DEBUG - expand_all_occurrences for personnelandotherservices -> set()
+2025-10-03 12:12:52,005 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,006 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,010 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:52,010 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,010 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:52,010 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:52,010 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,023 - DEBUG - Expanded propertymanagementservices -> set()
+2025-10-03 12:12:52,023 - DEBUG - expand_all_occurrences for propertymanagementservices -> set()
+2025-10-03 12:12:52,023 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,023 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,028 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:52,028 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,028 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:52,028 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:52,028 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,041 - DEBUG - Expanded corporateservices -> set()
+2025-10-03 12:12:52,041 - DEBUG - expand_all_occurrences for corporateservices -> set()
+2025-10-03 12:12:52,041 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,041 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,046 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:52,046 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,046 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:52,047 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:52,047 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,059 - DEBUG - Expanded corporateservicesseverance -> set()
+2025-10-03 12:12:52,059 - DEBUG - expand_all_occurrences for corporateservicesseverance -> set()
+2025-10-03 12:12:52,059 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,059 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,064 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:52,065 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,065 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:52,065 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:52,065 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,077 - DEBUG - Expanded corporateservicesipo -> set()
+2025-10-03 12:12:52,077 - DEBUG - expand_all_occurrences for corporateservicesipo -> set()
+2025-10-03 12:12:52,077 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,077 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,082 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:52,082 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,082 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:52,082 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:52,082 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,094 - DEBUG - Expanded allocationruledatefrom -> {'agg.period_month'}
+2025-10-03 12:12:52,094 - DEBUG - expand_all_occurrences for allocationruledatefrom -> {'agg.period_month'}
+2025-10-03 12:12:52,094 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,094 - DEBUG - Forward lineage: {'source_columns': ['agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,099 - DEBUG - Expanded perioddate -> set()
+2025-10-03 12:12:52,100 - DEBUG - expand_all_occurrences for perioddate -> set()
+2025-10-03 12:12:52,100 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,100 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:52,100 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:52,100 - INFO - Bidirectional lineage result: {'source_columns': ['agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,116 - DEBUG - Expanded allocationruledateto -> {'agg.period_month'}
+2025-10-03 12:12:52,116 - DEBUG - expand_all_occurrences for allocationruledateto -> {'agg.period_month'}
+2025-10-03 12:12:52,116 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,116 - DEBUG - Forward lineage: {'source_columns': ['agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,120 - DEBUG - Expanded perioddate -> set()
+2025-10-03 12:12:52,121 - DEBUG - expand_all_occurrences for perioddate -> set()
+2025-10-03 12:12:52,121 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,121 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:52,121 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:52,121 - INFO - Bidirectional lineage result: {'source_columns': ['agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,137 - DEBUG - Expanded payrollbasis -> set()
+2025-10-03 12:12:52,138 - DEBUG - expand_all_occurrences for payrollbasis -> set()
+2025-10-03 12:12:52,138 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,138 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,142 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:12:52,142 - DEBUG - Top-level order columns: set()
+2025-10-03 12:12:52,142 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:12:52,142 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:12:52,142 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:12:52,151 - CRITICAL - Fatal error in main execution: 'org_id'
+2025-10-03 12:17:48,782 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 12:17:50,021 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf6af6-3201-fad8-0010-15ba00032ace
+2025-10-03 12:17:50,600 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf6b3f-3201-fa73-0010-15ba00034306
+2025-10-03 12:17:51,188 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf74d7-3201-fad1-0010-15ba0003324e
+2025-10-03 12:17:52,315 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf74f5-3201-fbe2-0010-15ba0003606e
+2025-10-03 12:17:52,887 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf750b-3201-fbe2-0010-15ba00036096
+2025-10-03 12:17:53,475 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf750f-3201-fbe2-0010-15ba000360aa
+2025-10-03 12:17:54,050 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf7514-3201-fad8-0010-15ba00032cb6
+2025-10-03 12:17:54,063 - DEBUG - Expanded allocationrulekey -> {'agg.period_month', 'agg.allocationrule', 'agg.PROD_TZ', 'agg.dbt_dalltech'}
+2025-10-03 12:17:54,064 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.period_month', 'agg.allocationrule', 'agg.PROD_TZ', 'agg.dbt_dalltech'}
+2025-10-03 12:17:54,064 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,064 - DEBUG - Forward lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,069 - DEBUG - Expanded allocationrulekey -> {'agg.period_month', 'agg.allocationrule', 'agg.PROD_TZ', 'agg.dbt_dalltech'}
+2025-10-03 12:17:54,069 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.period_month', 'agg.allocationrule', 'agg.PROD_TZ', 'agg.dbt_dalltech'}
+2025-10-03 12:17:54,069 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,069 - DEBUG - Reverse lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,069 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,069 - INFO - Bidirectional lineage result: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,082 - DEBUG - Expanded allocationrulekey -> {'agg.period_month', 'agg.allocationrule', 'agg.PROD_TZ', 'agg.dbt_dalltech'}
+2025-10-03 12:17:54,082 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.period_month', 'agg.allocationrule', 'agg.PROD_TZ', 'agg.dbt_dalltech'}
+2025-10-03 12:17:54,082 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,082 - DEBUG - Forward lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,086 - DEBUG - Expanded deptcd -> set()
+2025-10-03 12:17:54,087 - DEBUG - expand_all_occurrences for deptcd -> set()
+2025-10-03 12:17:54,087 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,087 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,087 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,087 - INFO - Bidirectional lineage result: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,102 - DEBUG - Expanded allocationrulekey -> {'agg.period_month', 'agg.allocationrule', 'agg.PROD_TZ', 'agg.dbt_dalltech'}
+2025-10-03 12:17:54,102 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.period_month', 'agg.allocationrule', 'agg.PROD_TZ', 'agg.dbt_dalltech'}
+2025-10-03 12:17:54,102 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,102 - DEBUG - Forward lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,107 - DEBUG - Expanded perioddate -> set()
+2025-10-03 12:17:54,107 - DEBUG - expand_all_occurrences for perioddate -> set()
+2025-10-03 12:17:54,108 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,108 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,108 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,108 - INFO - Bidirectional lineage result: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,123 - DEBUG - Expanded allocationruledesc -> set()
+2025-10-03 12:17:54,123 - DEBUG - expand_all_occurrences for allocationruledesc -> set()
+2025-10-03 12:17:54,123 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,123 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,127 - DEBUG - Expanded deptcd -> set()
+2025-10-03 12:17:54,128 - DEBUG - expand_all_occurrences for deptcd -> set()
+2025-10-03 12:17:54,128 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,128 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,128 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,128 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,144 - DEBUG - Expanded operationordergroup -> set()
+2025-10-03 12:17:54,144 - DEBUG - expand_all_occurrences for operationordergroup -> set()
+2025-10-03 12:17:54,144 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,144 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,149 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,149 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,149 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,149 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,149 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,163 - DEBUG - Expanded fundlist -> set()
+2025-10-03 12:17:54,163 - DEBUG - expand_all_occurrences for fundlist -> set()
+2025-10-03 12:17:54,164 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,164 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,169 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,169 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,170 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,170 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,170 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,182 - DEBUG - Expanded departmentlist -> {'source_data.deptcd'}
+2025-10-03 12:17:54,182 - DEBUG - Expanded departmentlist -> set()
+2025-10-03 12:17:54,183 - DEBUG - expand_all_occurrences for departmentlist -> {'source_data.deptcd'}
+2025-10-03 12:17:54,183 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,183 - DEBUG - Forward lineage: {'source_columns': ['source_data.deptcd'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,187 - DEBUG - Expanded deptcd -> set()
+2025-10-03 12:17:54,188 - DEBUG - expand_all_occurrences for deptcd -> set()
+2025-10-03 12:17:54,188 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,188 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,188 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,188 - INFO - Bidirectional lineage result: {'source_columns': ['source_data.deptcd'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,203 - DEBUG - Expanded marketlist -> set()
+2025-10-03 12:17:54,204 - DEBUG - expand_all_occurrences for marketlist -> set()
+2025-10-03 12:17:54,204 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,204 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,208 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,208 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,208 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,208 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,208 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,221 - DEBUG - Expanded accountlist -> set()
+2025-10-03 12:17:54,221 - DEBUG - expand_all_occurrences for accountlist -> set()
+2025-10-03 12:17:54,221 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,221 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,226 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,226 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,226 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,226 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,226 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,239 - DEBUG - Expanded accountfrom -> set()
+2025-10-03 12:17:54,239 - DEBUG - expand_all_occurrences for accountfrom -> set()
+2025-10-03 12:17:54,239 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,239 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,244 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,244 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,244 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,244 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,244 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,255 - DEBUG - Expanded accountto -> set()
+2025-10-03 12:17:54,255 - DEBUG - expand_all_occurrences for accountto -> set()
+2025-10-03 12:17:54,255 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,256 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,260 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,260 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,260 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,261 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,261 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,273 - DEBUG - Expanded propertyallocation -> set()
+2025-10-03 12:17:54,273 - DEBUG - expand_all_occurrences for propertyallocation -> set()
+2025-10-03 12:17:54,273 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,273 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,278 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,278 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,278 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,278 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,278 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,290 - DEBUG - Expanded allocationtype -> set()
+2025-10-03 12:17:54,290 - DEBUG - expand_all_occurrences for allocationtype -> set()
+2025-10-03 12:17:54,290 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,290 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,295 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,295 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,295 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,295 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,295 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,307 - DEBUG - Expanded personnelandotherservices -> set()
+2025-10-03 12:17:54,307 - DEBUG - expand_all_occurrences for personnelandotherservices -> set()
+2025-10-03 12:17:54,307 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,307 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,312 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,312 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,312 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,312 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,312 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,324 - DEBUG - Expanded propertymanagementservices -> set()
+2025-10-03 12:17:54,324 - DEBUG - expand_all_occurrences for propertymanagementservices -> set()
+2025-10-03 12:17:54,324 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,324 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,329 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,329 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,329 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,329 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,329 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,342 - DEBUG - Expanded corporateservices -> set()
+2025-10-03 12:17:54,342 - DEBUG - expand_all_occurrences for corporateservices -> set()
+2025-10-03 12:17:54,342 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,342 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,347 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,347 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,347 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,347 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,347 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,358 - DEBUG - Expanded corporateservicesseverance -> set()
+2025-10-03 12:17:54,358 - DEBUG - expand_all_occurrences for corporateservicesseverance -> set()
+2025-10-03 12:17:54,358 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,358 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,363 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,363 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,363 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,363 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,363 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,376 - DEBUG - Expanded corporateservicesipo -> set()
+2025-10-03 12:17:54,376 - DEBUG - expand_all_occurrences for corporateservicesipo -> set()
+2025-10-03 12:17:54,376 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,376 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,381 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,381 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,381 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,381 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,381 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,393 - DEBUG - Expanded allocationruledatefrom -> {'agg.period_month'}
+2025-10-03 12:17:54,393 - DEBUG - expand_all_occurrences for allocationruledatefrom -> {'agg.period_month'}
+2025-10-03 12:17:54,393 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,393 - DEBUG - Forward lineage: {'source_columns': ['agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,397 - DEBUG - Expanded perioddate -> set()
+2025-10-03 12:17:54,398 - DEBUG - expand_all_occurrences for perioddate -> set()
+2025-10-03 12:17:54,398 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,398 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,398 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,398 - INFO - Bidirectional lineage result: {'source_columns': ['agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,414 - DEBUG - Expanded allocationruledateto -> {'agg.period_month'}
+2025-10-03 12:17:54,414 - DEBUG - expand_all_occurrences for allocationruledateto -> {'agg.period_month'}
+2025-10-03 12:17:54,414 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,414 - DEBUG - Forward lineage: {'source_columns': ['agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,418 - DEBUG - Expanded perioddate -> set()
+2025-10-03 12:17:54,419 - DEBUG - expand_all_occurrences for perioddate -> set()
+2025-10-03 12:17:54,419 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,419 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,419 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,419 - INFO - Bidirectional lineage result: {'source_columns': ['agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,435 - DEBUG - Expanded payrollbasis -> set()
+2025-10-03 12:17:54,435 - DEBUG - expand_all_occurrences for payrollbasis -> set()
+2025-10-03 12:17:54,435 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,435 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:54,439 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:17:54,439 - DEBUG - Top-level order columns: set()
+2025-10-03 12:17:54,439 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:17:54,440 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:17:54,440 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:17:57,507 - INFO - 27 records deactivated in ColumnLevelLineage table, 45 new records inserted in ColumnLevelLineage table.
+2025-10-03 12:17:59,958 - INFO - 101 records deactivated in FilterClauseColumnLineage table, 247 new records inserted in FilterClauseColumnLineage table.
+2025-10-03 12:18:00,661 - INFO - Updated watermark for batch 0013abc8-8899-49df-a5c2-193f5551d24c
+2025-10-03 12:28:20,440 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 12:28:21,252 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf751f-3201-fa73-0010-15ba00034432
+2025-10-03 12:28:21,253 - CRITICAL - Fatal error in main execution: 'query_id'
+2025-10-03 12:36:11,969 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 12:36:13,079 - WARNING - No column mapping found for * → * between allocationrule and allocationrule_archive for query_id 01bf7526-3201-fa73-0010-15ba00034446
+2025-10-03 12:36:13,080 - INFO - No lineage to process
+2025-10-03 12:44:43,724 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 12:44:43,907 - DEBUG - Expanded allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:44:43,908 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:44:43,908 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:43,909 - DEBUG - Forward lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:43,915 - DEBUG - Expanded allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:44:43,916 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:44:43,916 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:43,916 - DEBUG - Reverse lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:43,916 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:43,916 - INFO - Bidirectional lineage result: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:43,935 - DEBUG - Expanded allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:44:43,935 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:44:43,935 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:43,935 - DEBUG - Forward lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:43,941 - DEBUG - Expanded deptcd -> set()
+2025-10-03 12:44:43,942 - DEBUG - expand_all_occurrences for deptcd -> set()
+2025-10-03 12:44:43,942 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:43,942 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:43,942 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:43,943 - INFO - Bidirectional lineage result: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:43,978 - DEBUG - Expanded allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:44:43,978 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:44:43,978 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:43,979 - DEBUG - Forward lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:43,986 - DEBUG - Expanded perioddate -> set()
+2025-10-03 12:44:43,988 - DEBUG - expand_all_occurrences for perioddate -> set()
+2025-10-03 12:44:43,988 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:43,988 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:43,988 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:43,988 - INFO - Bidirectional lineage result: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,039 - DEBUG - Expanded allocationruledesc -> set()
+2025-10-03 12:44:44,039 - DEBUG - expand_all_occurrences for allocationruledesc -> set()
+2025-10-03 12:44:44,039 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,039 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,043 - DEBUG - Expanded deptcd -> set()
+2025-10-03 12:44:44,045 - DEBUG - expand_all_occurrences for deptcd -> set()
+2025-10-03 12:44:44,045 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,045 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,045 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,045 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,086 - DEBUG - Expanded operationordergroup -> set()
+2025-10-03 12:44:44,086 - DEBUG - expand_all_occurrences for operationordergroup -> set()
+2025-10-03 12:44:44,086 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,086 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,092 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,092 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,092 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,092 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,092 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,109 - DEBUG - Expanded fundlist -> set()
+2025-10-03 12:44:44,109 - DEBUG - expand_all_occurrences for fundlist -> set()
+2025-10-03 12:44:44,109 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,109 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,116 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,116 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,116 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,117 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,117 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,143 - DEBUG - Expanded departmentlist -> {'source_data.deptcd'}
+2025-10-03 12:44:44,144 - DEBUG - Expanded departmentlist -> set()
+2025-10-03 12:44:44,145 - DEBUG - expand_all_occurrences for departmentlist -> {'source_data.deptcd'}
+2025-10-03 12:44:44,145 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,145 - DEBUG - Forward lineage: {'source_columns': ['source_data.deptcd'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,154 - DEBUG - Expanded deptcd -> set()
+2025-10-03 12:44:44,156 - DEBUG - expand_all_occurrences for deptcd -> set()
+2025-10-03 12:44:44,156 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,156 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,157 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,157 - INFO - Bidirectional lineage result: {'source_columns': ['source_data.deptcd'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,185 - DEBUG - Expanded marketlist -> set()
+2025-10-03 12:44:44,185 - DEBUG - expand_all_occurrences for marketlist -> set()
+2025-10-03 12:44:44,185 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,185 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,190 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,190 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,190 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,190 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,190 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,209 - DEBUG - Expanded accountlist -> set()
+2025-10-03 12:44:44,209 - DEBUG - expand_all_occurrences for accountlist -> set()
+2025-10-03 12:44:44,209 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,209 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,214 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,214 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,214 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,214 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,214 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,228 - DEBUG - Expanded accountfrom -> set()
+2025-10-03 12:44:44,229 - DEBUG - expand_all_occurrences for accountfrom -> set()
+2025-10-03 12:44:44,229 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,229 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,235 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,235 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,235 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,235 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,235 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,249 - DEBUG - Expanded accountto -> set()
+2025-10-03 12:44:44,249 - DEBUG - expand_all_occurrences for accountto -> set()
+2025-10-03 12:44:44,249 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,249 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,255 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,255 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,255 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,255 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,255 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,274 - DEBUG - Expanded propertyallocation -> set()
+2025-10-03 12:44:44,274 - DEBUG - expand_all_occurrences for propertyallocation -> set()
+2025-10-03 12:44:44,274 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,274 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,280 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,280 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,280 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,281 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,281 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,296 - DEBUG - Expanded allocationtype -> set()
+2025-10-03 12:44:44,296 - DEBUG - expand_all_occurrences for allocationtype -> set()
+2025-10-03 12:44:44,296 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,296 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,301 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,302 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,302 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,302 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,302 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,315 - DEBUG - Expanded personnelandotherservices -> set()
+2025-10-03 12:44:44,315 - DEBUG - expand_all_occurrences for personnelandotherservices -> set()
+2025-10-03 12:44:44,315 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,315 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,321 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,322 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,322 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,322 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,322 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,338 - DEBUG - Expanded propertymanagementservices -> set()
+2025-10-03 12:44:44,338 - DEBUG - expand_all_occurrences for propertymanagementservices -> set()
+2025-10-03 12:44:44,338 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,338 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,343 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,343 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,343 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,343 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,343 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,356 - DEBUG - Expanded corporateservices -> set()
+2025-10-03 12:44:44,357 - DEBUG - expand_all_occurrences for corporateservices -> set()
+2025-10-03 12:44:44,357 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,357 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,362 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,362 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,362 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,362 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,362 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,376 - DEBUG - Expanded corporateservicesseverance -> set()
+2025-10-03 12:44:44,376 - DEBUG - expand_all_occurrences for corporateservicesseverance -> set()
+2025-10-03 12:44:44,376 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,377 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,381 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,382 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,382 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,382 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,382 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,397 - DEBUG - Expanded corporateservicesipo -> set()
+2025-10-03 12:44:44,397 - DEBUG - expand_all_occurrences for corporateservicesipo -> set()
+2025-10-03 12:44:44,397 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,397 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,403 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,403 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,403 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,403 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,403 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,419 - DEBUG - Expanded allocationruledatefrom -> {'agg.period_month'}
+2025-10-03 12:44:44,419 - DEBUG - expand_all_occurrences for allocationruledatefrom -> {'agg.period_month'}
+2025-10-03 12:44:44,419 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,419 - DEBUG - Forward lineage: {'source_columns': ['agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,424 - DEBUG - Expanded perioddate -> set()
+2025-10-03 12:44:44,425 - DEBUG - expand_all_occurrences for perioddate -> set()
+2025-10-03 12:44:44,425 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,426 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,426 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,426 - INFO - Bidirectional lineage result: {'source_columns': ['agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,447 - DEBUG - Expanded allocationruledateto -> {'agg.period_month'}
+2025-10-03 12:44:44,447 - DEBUG - expand_all_occurrences for allocationruledateto -> {'agg.period_month'}
+2025-10-03 12:44:44,447 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,447 - DEBUG - Forward lineage: {'source_columns': ['agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,451 - DEBUG - Expanded perioddate -> set()
+2025-10-03 12:44:44,453 - DEBUG - expand_all_occurrences for perioddate -> set()
+2025-10-03 12:44:44,453 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,453 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,453 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,453 - INFO - Bidirectional lineage result: {'source_columns': ['agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,472 - DEBUG - Expanded payrollbasis -> set()
+2025-10-03 12:44:44,472 - DEBUG - expand_all_occurrences for payrollbasis -> set()
+2025-10-03 12:44:44,472 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,472 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:44,477 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:44:44,477 - DEBUG - Top-level order columns: set()
+2025-10-03 12:44:44,477 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:44:44,477 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:44:44,477 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:44:46,864 - INFO - Inserted 21 lineage records into column_level_lineage
+2025-10-03 12:44:47,834 - INFO - Inserted 43 lineage records into filter_clause_column_lineage
+2025-10-03 12:44:48,553 - INFO - Updated watermark for batch 75d663d2-bbbd-4836-92aa-e44b84f878bf
+2025-10-03 12:51:46,291 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 12:51:46,345 - DEBUG - Expanded allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:51:46,346 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:51:46,346 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,346 - DEBUG - Forward lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,351 - DEBUG - Expanded allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:51:46,351 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:51:46,351 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,351 - DEBUG - Reverse lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,351 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,351 - INFO - Bidirectional lineage result: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,364 - DEBUG - Expanded allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:51:46,364 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:51:46,364 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,364 - DEBUG - Forward lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,370 - DEBUG - Expanded deptcd -> set()
+2025-10-03 12:51:46,372 - DEBUG - expand_all_occurrences for deptcd -> set()
+2025-10-03 12:51:46,372 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,372 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,372 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,372 - INFO - Bidirectional lineage result: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,388 - DEBUG - Expanded allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:51:46,388 - DEBUG - expand_all_occurrences for allocationrulekey -> {'agg.PROD_TZ', 'agg.period_month', 'agg.dbt_dalltech', 'agg.allocationrule'}
+2025-10-03 12:51:46,388 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,389 - DEBUG - Forward lineage: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,393 - DEBUG - Expanded perioddate -> set()
+2025-10-03 12:51:46,394 - DEBUG - expand_all_occurrences for perioddate -> set()
+2025-10-03 12:51:46,394 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,394 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,394 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,394 - INFO - Bidirectional lineage result: {'source_columns': ['agg.PROD_TZ', 'agg.allocationrule', 'agg.dbt_dalltech', 'agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,411 - DEBUG - Expanded allocationruledesc -> set()
+2025-10-03 12:51:46,412 - DEBUG - expand_all_occurrences for allocationruledesc -> set()
+2025-10-03 12:51:46,412 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,412 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,416 - DEBUG - Expanded deptcd -> set()
+2025-10-03 12:51:46,417 - DEBUG - expand_all_occurrences for deptcd -> set()
+2025-10-03 12:51:46,417 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,417 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,417 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,417 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,433 - DEBUG - Expanded operationordergroup -> set()
+2025-10-03 12:51:46,434 - DEBUG - expand_all_occurrences for operationordergroup -> set()
+2025-10-03 12:51:46,434 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,434 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,439 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,439 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,439 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,439 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,439 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,455 - DEBUG - Expanded fundlist -> set()
+2025-10-03 12:51:46,455 - DEBUG - expand_all_occurrences for fundlist -> set()
+2025-10-03 12:51:46,455 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,455 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,461 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,461 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,461 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,461 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,461 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,476 - DEBUG - Expanded departmentlist -> {'source_data.deptcd'}
+2025-10-03 12:51:46,477 - DEBUG - Expanded departmentlist -> set()
+2025-10-03 12:51:46,477 - DEBUG - expand_all_occurrences for departmentlist -> {'source_data.deptcd'}
+2025-10-03 12:51:46,477 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,477 - DEBUG - Forward lineage: {'source_columns': ['source_data.deptcd'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,481 - DEBUG - Expanded deptcd -> set()
+2025-10-03 12:51:46,482 - DEBUG - expand_all_occurrences for deptcd -> set()
+2025-10-03 12:51:46,482 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,482 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,482 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,482 - INFO - Bidirectional lineage result: {'source_columns': ['source_data.deptcd'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,499 - DEBUG - Expanded marketlist -> set()
+2025-10-03 12:51:46,499 - DEBUG - expand_all_occurrences for marketlist -> set()
+2025-10-03 12:51:46,499 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,499 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,505 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,505 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,505 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,505 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,505 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,519 - DEBUG - Expanded accountlist -> set()
+2025-10-03 12:51:46,519 - DEBUG - expand_all_occurrences for accountlist -> set()
+2025-10-03 12:51:46,519 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,519 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,524 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,525 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,525 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,525 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,525 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,537 - DEBUG - Expanded accountfrom -> set()
+2025-10-03 12:51:46,537 - DEBUG - expand_all_occurrences for accountfrom -> set()
+2025-10-03 12:51:46,537 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,538 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,545 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,546 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,546 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,546 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,546 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,564 - DEBUG - Expanded accountto -> set()
+2025-10-03 12:51:46,565 - DEBUG - expand_all_occurrences for accountto -> set()
+2025-10-03 12:51:46,565 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,565 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,571 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,571 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,571 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,571 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,571 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,588 - DEBUG - Expanded propertyallocation -> set()
+2025-10-03 12:51:46,589 - DEBUG - expand_all_occurrences for propertyallocation -> set()
+2025-10-03 12:51:46,589 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,589 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,597 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,597 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,597 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,597 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,598 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,613 - DEBUG - Expanded allocationtype -> set()
+2025-10-03 12:51:46,613 - DEBUG - expand_all_occurrences for allocationtype -> set()
+2025-10-03 12:51:46,613 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,613 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,619 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,619 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,619 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,619 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,619 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,632 - DEBUG - Expanded personnelandotherservices -> set()
+2025-10-03 12:51:46,632 - DEBUG - expand_all_occurrences for personnelandotherservices -> set()
+2025-10-03 12:51:46,632 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,632 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,638 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,638 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,638 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,638 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,638 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,653 - DEBUG - Expanded propertymanagementservices -> set()
+2025-10-03 12:51:46,653 - DEBUG - expand_all_occurrences for propertymanagementservices -> set()
+2025-10-03 12:51:46,653 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,654 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,660 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,660 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,660 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,660 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,661 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,675 - DEBUG - Expanded corporateservices -> set()
+2025-10-03 12:51:46,675 - DEBUG - expand_all_occurrences for corporateservices -> set()
+2025-10-03 12:51:46,675 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,675 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,682 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,682 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,682 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,682 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,682 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,696 - DEBUG - Expanded corporateservicesseverance -> set()
+2025-10-03 12:51:46,696 - DEBUG - expand_all_occurrences for corporateservicesseverance -> set()
+2025-10-03 12:51:46,696 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,696 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,701 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,701 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,701 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,701 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,701 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,717 - DEBUG - Expanded corporateservicesipo -> set()
+2025-10-03 12:51:46,718 - DEBUG - expand_all_occurrences for corporateservicesipo -> set()
+2025-10-03 12:51:46,718 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,718 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,723 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,723 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,723 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,723 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,724 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,739 - DEBUG - Expanded allocationruledatefrom -> {'agg.period_month'}
+2025-10-03 12:51:46,739 - DEBUG - expand_all_occurrences for allocationruledatefrom -> {'agg.period_month'}
+2025-10-03 12:51:46,739 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,739 - DEBUG - Forward lineage: {'source_columns': ['agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,745 - DEBUG - Expanded perioddate -> set()
+2025-10-03 12:51:46,746 - DEBUG - expand_all_occurrences for perioddate -> set()
+2025-10-03 12:51:46,746 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,746 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,746 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,746 - INFO - Bidirectional lineage result: {'source_columns': ['agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,762 - DEBUG - Expanded allocationruledateto -> {'agg.period_month'}
+2025-10-03 12:51:46,763 - DEBUG - expand_all_occurrences for allocationruledateto -> {'agg.period_month'}
+2025-10-03 12:51:46,763 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,763 - DEBUG - Forward lineage: {'source_columns': ['agg.period_month'], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,767 - DEBUG - Expanded perioddate -> set()
+2025-10-03 12:51:46,768 - DEBUG - expand_all_occurrences for perioddate -> set()
+2025-10-03 12:51:46,768 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,768 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,768 - DEBUG - union_filter_dicts output: {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,768 - INFO - Bidirectional lineage result: {'source_columns': ['agg.period_month'], 'filters': {'where': ['scenariocd'], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,787 - DEBUG - Expanded payrollbasis -> set()
+2025-10-03 12:51:46,787 - DEBUG - expand_all_occurrences for payrollbasis -> set()
+2025-10-03 12:51:46,787 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,787 - DEBUG - Forward lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:46,792 - DEBUG - expand_all_occurrences for None -> set()
+2025-10-03 12:51:46,792 - DEBUG - Top-level order columns: set()
+2025-10-03 12:51:46,792 - DEBUG - Reverse lineage: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': []}}
+2025-10-03 12:51:46,792 - DEBUG - union_filter_dicts output: {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}
+2025-10-03 12:51:46,792 - INFO - Bidirectional lineage result: {'source_columns': [], 'filters': {'where': [], 'group_by': [], 'having': [], 'join_on': [], 'order_by': [], 'qualify': [], 'window_partition_by': [], 'window_order_by': ['departmentlist', 'period_month']}}
+2025-10-03 12:51:49,393 - INFO - 27 records deactivated in ColumnLevelLineage table, 45 new records inserted in ColumnLevelLineage table.
+2025-10-03 12:51:52,017 - INFO - 101 records deactivated in FilterClauseColumnLineage table, 247 new records inserted in FilterClauseColumnLineage table.
+2025-10-03 12:51:52,709 - INFO - Updated watermark for batch a0bc87cb-98c4-4198-8608-a417f0dd4fa8
+2025-10-03 13:39:13,829 - INFO - Starting lineage_builder with org_id=76d33fb3-6062-456b-a211-4aec9971f8be, conn_id=db7cb2cf-bea2-4c52-8c82-62ce6e317afc, batch_id=ec012753-f7e1-4dee-b91d-6db1f0a64b5c
+2025-10-03 13:39:13,834 - INFO - PostgreSQL engine created successfully
+2025-10-03 13:39:20,842 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 13:39:20,856 - INFO - Last processed timestamp: 2025-10-03 08:09:05.211869+00:00
+2025-10-03 13:39:20,888 - INFO - Queries combined by session, processing 1 sessions
+2025-10-03 13:39:20,889 - INFO - Base objects accessed parsed successfully
+2025-10-03 13:39:20,947 - INFO - Processing lineage consolidation...
+2025-10-03 13:39:20,948 - INFO - Query IDs converted to strings
+2025-10-03 13:39:20,949 - INFO - Lineage consolidated, 21 records in consolidated_df
+2025-10-03 13:39:20,949 - INFO - Added org_id, connection_id, and batch_id columns to consolidated_df
+2025-10-03 13:39:20,949 - INFO - Consolidated query IDs converted to strings
+2025-10-03 13:39:20,953 - INFO - Filter clause DataFrame merged, 21 records
+2025-10-03 13:39:21,302 - INFO - Dependent columns extracted, 48 rows
+2025-10-03 13:39:21,303 - INFO - Added org_id, connection_id, and batch_id columns to final_filter_clause_df
+2025-10-03 13:39:21,303 - INFO - Starting lineage processing...
+2025-10-03 13:39:21,303 - INFO - Processing with direct insert...
+2025-10-03 13:39:23,228 - INFO - Inserted 21 lineage records into column_level_lineage
+2025-10-03 13:39:23,973 - INFO - Inserted 43 lineage records into filter_clause_column_lineage
+2025-10-03 13:39:23,973 - INFO - Creating watermark...
+2025-10-03 13:39:24,700 - INFO - Updated watermark for batch ec012753-f7e1-4dee-b91d-6db1f0a64b5c
+2025-10-03 13:39:24,701 - INFO - Lineage processing completed successfully
+2025-10-03 13:45:14,800 - INFO - Starting lineage_builder with org_id=76d33fb3-6062-456b-a211-4aec9971f8be, conn_id=db7cb2cf-bea2-4c52-8c82-62ce6e317afc, batch_id=056c8dc9-f09c-47f5-8f68-8e02856d436f
+2025-10-03 13:45:14,815 - INFO - PostgreSQL engine created successfully
+2025-10-03 13:45:23,716 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 13:45:23,719 - INFO - Last processed timestamp: 2025-10-03 08:15:05.248640+00:00
+2025-10-03 13:45:23,743 - INFO - Queries combined by session, processing 2 sessions
+2025-10-03 13:45:23,744 - INFO - Base objects accessed parsed successfully
+2025-10-03 13:45:23,930 - INFO - Processing lineage consolidation...
+2025-10-03 13:45:23,930 - INFO - Query IDs converted to strings
+2025-10-03 13:45:23,931 - INFO - Lineage consolidated, 41 records in consolidated_df
+2025-10-03 13:45:23,931 - INFO - Added org_id, connection_id, and batch_id columns to consolidated_df
+2025-10-03 13:45:23,931 - INFO - Consolidated query IDs converted to strings
+2025-10-03 13:45:23,933 - INFO - Filter clause DataFrame merged, 41 records
+2025-10-03 13:45:24,420 - INFO - Dependent columns extracted, 48 rows
+2025-10-03 13:45:24,421 - INFO - Added org_id, connection_id, and batch_id columns to final_filter_clause_df
+2025-10-03 13:45:24,421 - INFO - Starting lineage processing...
+2025-10-03 13:45:24,421 - INFO - Processing with SCD Type 2...
+2025-10-03 13:45:25,406 - INFO - 0 records deactivated in ColumnLevelLineage table, 20 new records inserted in ColumnLevelLineage table.
+2025-10-03 13:45:25,424 - INFO - 0 records deactivated in FilterClauseColumnLineage table, 0 new records inserted in FilterClauseColumnLineage table.
+2025-10-03 13:45:25,424 - INFO - Creating watermark...
+2025-10-03 13:45:26,140 - INFO - Updated watermark for batch 056c8dc9-f09c-47f5-8f68-8e02856d436f
+2025-10-03 13:45:26,140 - INFO - Lineage processing completed successfully
+2025-10-03 13:51:13,900 - INFO - Starting lineage_builder with org_id=76d33fb3-6062-456b-a211-4aec9971f8be, conn_id=db7cb2cf-bea2-4c52-8c82-62ce6e317afc, batch_id=63c85784-87ee-4090-bdc7-2ff5d023516c
+2025-10-03 13:51:13,904 - INFO - PostgreSQL engine created successfully
+2025-10-03 13:51:23,254 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 13:51:23,256 - INFO - Last processed timestamp: 2025-10-03 08:21:05.249958+00:00
+2025-10-03 13:51:23,286 - INFO - Queries combined by session, processing 3 sessions
+2025-10-03 13:51:23,287 - INFO - Base objects accessed parsed successfully
+2025-10-03 13:51:23,381 - INFO - Processing lineage consolidation...
+2025-10-03 13:51:23,382 - INFO - Query IDs converted to strings
+2025-10-03 13:51:23,392 - INFO - Lineage consolidated, 41 records in consolidated_df
+2025-10-03 13:51:23,393 - INFO - Added org_id, connection_id, and batch_id columns to consolidated_df
+2025-10-03 13:51:23,393 - INFO - Consolidated query IDs converted to strings
+2025-10-03 13:51:23,394 - INFO - Filter clause DataFrame merged, 41 records
+2025-10-03 13:51:23,890 - INFO - Dependent columns extracted, 48 rows
+2025-10-03 13:51:23,892 - INFO - Added org_id, connection_id, and batch_id columns to final_filter_clause_df
+2025-10-03 13:51:23,892 - INFO - Starting lineage processing...
+2025-10-03 13:51:23,892 - INFO - Processing with SCD Type 2...
+2025-10-03 13:51:23,897 - INFO - 0 records deactivated in ColumnLevelLineage table, 0 new records inserted in ColumnLevelLineage table.
+2025-10-03 13:51:23,902 - INFO - 0 records deactivated in FilterClauseColumnLineage table, 0 new records inserted in FilterClauseColumnLineage table.
+2025-10-03 13:51:23,902 - INFO - Creating watermark...
+2025-10-03 13:51:25,103 - INFO - Updated watermark for batch 63c85784-87ee-4090-bdc7-2ff5d023516c
+2025-10-03 13:51:25,104 - INFO - Lineage processing completed successfully
+2025-10-03 14:01:12,563 - INFO - Starting lineage_builder with org_id=76d33fb3-6062-456b-a211-4aec9971f8be, conn_id=db7cb2cf-bea2-4c52-8c82-62ce6e317afc, batch_id=a76427be-8837-40e7-bffe-fc5839ac4116
+2025-10-03 14:01:12,569 - INFO - PostgreSQL engine created successfully
+2025-10-03 14:01:24,745 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 14:01:24,746 - INFO - Last processed timestamp: 2025-10-03 08:31:05.301835+00:00
+2025-10-03 14:01:24,776 - INFO - Queries combined by session, processing 3 sessions
+2025-10-03 14:01:24,776 - INFO - Base objects accessed parsed successfully
+2025-10-03 14:01:24,857 - INFO - Processing lineage consolidation...
+2025-10-03 14:01:24,857 - INFO - Query IDs converted to strings
+2025-10-03 14:01:24,859 - INFO - Lineage consolidated, 41 records in consolidated_df
+2025-10-03 14:01:24,859 - INFO - Added org_id, connection_id, and batch_id columns to consolidated_df
+2025-10-03 14:01:24,859 - INFO - Consolidated query IDs converted to strings
+2025-10-03 14:01:24,860 - INFO - Filter clause DataFrame merged, 41 records
+2025-10-03 14:01:25,398 - INFO - Dependent columns extracted, 48 rows
+2025-10-03 14:01:25,399 - INFO - Added org_id, connection_id, and batch_id columns to final_filter_clause_df
+2025-10-03 14:01:25,399 - INFO - Starting lineage processing...
+2025-10-03 14:01:25,399 - INFO - Processing with SCD Type 2...
+2025-10-03 14:01:25,404 - INFO - 0 records deactivated in ColumnLevelLineage table, 0 new records inserted in ColumnLevelLineage table.
+2025-10-03 14:01:25,409 - INFO - 0 records deactivated in FilterClauseColumnLineage table, 0 new records inserted in FilterClauseColumnLineage table.
+2025-10-03 14:01:25,409 - INFO - Creating watermark...
+2025-10-03 14:01:26,116 - INFO - Updated watermark for batch a76427be-8837-40e7-bffe-fc5839ac4116
+2025-10-03 14:01:26,117 - INFO - Lineage processing completed successfully
+2025-10-03 14:03:13,354 - INFO - Starting lineage_builder with org_id=76d33fb3-6062-456b-a211-4aec9971f8be, conn_id=db7cb2cf-bea2-4c52-8c82-62ce6e317afc, batch_id=8d6e3740-75a5-4c8f-8208-7cf154357cbc
+2025-10-03 14:03:13,361 - INFO - PostgreSQL engine created successfully
+2025-10-03 14:03:27,415 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 14:03:27,416 - INFO - Last processed timestamp: 2025-10-03 08:33:05.315396+00:00
+2025-10-03 14:03:27,445 - INFO - Queries combined by session, processing 3 sessions
+2025-10-03 14:03:27,446 - INFO - Base objects accessed parsed successfully
+2025-10-03 14:03:27,521 - INFO - Processing lineage consolidation...
+2025-10-03 14:03:27,522 - INFO - Query IDs converted to strings
+2025-10-03 14:03:27,523 - INFO - Lineage consolidated, 41 records in consolidated_df
+2025-10-03 14:03:27,523 - INFO - Added org_id, connection_id, and batch_id columns to consolidated_df
+2025-10-03 14:03:27,523 - INFO - Consolidated query IDs converted to strings
+2025-10-03 14:03:27,524 - INFO - Filter clause DataFrame merged, 41 records
+2025-10-03 14:03:28,005 - INFO - Dependent columns extracted, 48 rows
+2025-10-03 14:03:28,006 - INFO - Added org_id, connection_id, and batch_id columns to final_filter_clause_df
+2025-10-03 14:03:28,006 - INFO - Starting lineage processing...
+2025-10-03 14:03:28,006 - INFO - Processing with SCD Type 2...
+2025-10-03 14:03:28,010 - INFO - 0 records deactivated in ColumnLevelLineage table, 0 new records inserted in ColumnLevelLineage table.
+2025-10-03 14:03:28,015 - INFO - 0 records deactivated in FilterClauseColumnLineage table, 0 new records inserted in FilterClauseColumnLineage table.
+2025-10-03 14:03:28,015 - INFO - Creating watermark...
+2025-10-03 14:03:29,184 - INFO - Updated watermark for batch 8d6e3740-75a5-4c8f-8208-7cf154357cbc
+2025-10-03 14:03:29,184 - INFO - Lineage processing completed successfully
+2025-10-03 14:27:01,085 - INFO - Starting lineage_builder with org_id=76d33fb3-6062-456b-a211-4aec9971f8be, conn_id=db7cb2cf-bea2-4c52-8c82-62ce6e317afc, batch_id=336d740c-5c0c-4ff5-9658-3a2cbfc4d3b6
+2025-10-03 14:27:01,097 - INFO - PostgreSQL engine created successfully
+2025-10-03 14:27:16,965 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 14:27:16,979 - INFO - Last processed timestamp: 2025-10-03 08:56:45.631239+00:00
+2025-10-03 14:27:17,184 - INFO - Queries combined by session, processing 3 sessions
+2025-10-03 14:27:17,186 - INFO - Base objects accessed parsed successfully
+2025-10-03 14:27:17,293 - INFO - Processing lineage consolidation...
+2025-10-03 14:27:17,294 - INFO - Query IDs converted to strings
+2025-10-03 14:27:17,297 - INFO - Lineage consolidated, 41 records in consolidated_df
+2025-10-03 14:27:17,297 - INFO - Added org_id, connection_id, and batch_id columns to consolidated_df
+2025-10-03 14:27:17,297 - INFO - Consolidated query IDs converted to strings
+2025-10-03 14:27:17,302 - INFO - Filter clause DataFrame merged, 41 records
+2025-10-03 14:27:17,796 - INFO - Dependent columns extracted, 48 rows
+2025-10-03 14:27:17,797 - INFO - Added org_id, connection_id, and batch_id columns to final_filter_clause_df
+2025-10-03 14:27:17,797 - INFO - Starting lineage processing...
+2025-10-03 14:27:17,797 - INFO - Processing with SCD Type 2...
+2025-10-03 14:27:17,807 - INFO - 0 records deactivated in ColumnLevelLineage table, 0 new records inserted in ColumnLevelLineage table.
+2025-10-03 14:27:17,811 - INFO - 0 records deactivated in FilterClauseColumnLineage table, 0 new records inserted in FilterClauseColumnLineage table.
+2025-10-03 14:27:17,811 - INFO - Creating watermark...
+2025-10-03 14:27:18,547 - INFO - Updated watermark for batch 336d740c-5c0c-4ff5-9658-3a2cbfc4d3b6
+2025-10-03 14:27:18,548 - INFO - Lineage processing completed successfully
+2025-10-03 14:38:01,797 - INFO - Starting lineage_builder with org_id=76d33fb3-6062-456b-a211-4aec9971f8be, conn_id=db7cb2cf-bea2-4c52-8c82-62ce6e317afc, batch_id=4ac2a4dc-e90b-4fbb-9b36-7da865e6844e
+2025-10-03 14:38:01,804 - INFO - PostgreSQL engine created successfully
+2025-10-03 14:38:15,420 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 14:38:15,422 - INFO - Last processed timestamp: 2025-10-03 09:07:45.676680+00:00
+2025-10-03 14:38:15,454 - INFO - Queries combined by session, processing 4 sessions
+2025-10-03 14:38:15,455 - INFO - Base objects accessed parsed successfully
+2025-10-03 14:38:17,196 - INFO - Processing lineage consolidation...
+2025-10-03 14:38:17,196 - INFO - Query IDs converted to strings
+2025-10-03 14:38:17,245 - INFO - Lineage consolidated, 60 records in consolidated_df
+2025-10-03 14:38:17,245 - INFO - Added org_id, connection_id, and batch_id columns to consolidated_df
+2025-10-03 14:38:17,245 - INFO - Consolidated query IDs converted to strings
+2025-10-03 14:38:17,246 - INFO - Filter clause DataFrame merged, 60 records
+2025-10-03 14:38:17,791 - INFO - Dependent columns extracted, 48 rows
+2025-10-03 14:38:17,792 - INFO - Added org_id, connection_id, and batch_id columns to final_filter_clause_df
+2025-10-03 14:38:17,792 - INFO - Starting lineage processing...
+2025-10-03 14:38:17,792 - INFO - Processing with SCD Type 2...
+2025-10-03 14:38:18,519 - INFO - 0 records deactivated in ColumnLevelLineage table, 19 new records inserted in ColumnLevelLineage table.
+2025-10-03 14:38:18,537 - INFO - 0 records deactivated in FilterClauseColumnLineage table, 0 new records inserted in FilterClauseColumnLineage table.
+2025-10-03 14:38:18,537 - INFO - Creating watermark...
+2025-10-03 14:38:19,248 - INFO - Updated watermark for batch 4ac2a4dc-e90b-4fbb-9b36-7da865e6844e
+2025-10-03 14:38:19,249 - INFO - Lineage processing completed successfully
+2025-10-03 14:50:36,250 - INFO - Starting lineage_builder with org_id=76d33fb3-6062-456b-a211-4aec9971f8be, conn_id=db7cb2cf-bea2-4c52-8c82-62ce6e317afc, batch_id=f5f38031-1c5d-4cdd-8766-c874e880abd5
+2025-10-03 14:50:36,253 - INFO - PostgreSQL engine created successfully
+2025-10-03 14:50:54,491 - INFO - fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved
+2025-10-03 14:50:54,496 - INFO - Last processed timestamp: 2025-10-03 09:20:26.857318+00:00
+2025-10-03 14:50:54,643 - INFO - Queries combined by session, processing 5 sessions
+2025-10-03 14:50:54,643 - INFO - Base objects accessed parsed successfully
+2025-10-03 14:51:00,087 - INFO - Processing lineage consolidation...
+2025-10-03 14:51:00,088 - INFO - Query IDs converted to strings
+2025-10-03 14:51:00,191 - INFO - Lineage consolidated, 72 records in consolidated_df
+2025-10-03 14:51:00,192 - INFO - Added org_id, connection_id, and batch_id columns to consolidated_df
+2025-10-03 14:51:00,192 - INFO - Consolidated query IDs converted to strings
+2025-10-03 14:51:00,194 - INFO - Filter clause DataFrame merged, 72 records
+2025-10-03 14:51:00,949 - INFO - Dependent columns extracted, 48 rows
+2025-10-03 14:51:00,950 - INFO - Added org_id, connection_id, and batch_id columns to final_filter_clause_df
+2025-10-03 14:51:00,950 - INFO - Starting lineage processing...
+2025-10-03 14:51:00,950 - INFO - Processing with SCD Type 2...
+2025-10-03 14:51:01,672 - INFO - 0 records deactivated in ColumnLevelLineage table, 12 new records inserted in ColumnLevelLineage table.
+2025-10-03 14:51:01,687 - INFO - 0 records deactivated in FilterClauseColumnLineage table, 0 new records inserted in FilterClauseColumnLineage table.
+2025-10-03 14:51:01,687 - INFO - Creating watermark...
+2025-10-03 14:51:02,402 - INFO - Updated watermark for batch f5f38031-1c5d-4cdd-8766-c874e880abd5
+2025-10-03 14:51:02,403 - INFO - Lineage processing completed successfully
