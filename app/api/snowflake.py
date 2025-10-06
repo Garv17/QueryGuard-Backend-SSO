@@ -483,3 +483,116 @@ def get_selected_schemas(connection_id: str, database_name: str, current_user: U
     
     logger.debug("/snowflake/selected-schemas - count=%d", len(selected_schemas))
     return selected_schemas
+
+
+
+# --- Demo/Automation Endpoint ---
+@router.post("/demo-auto-setup/{connection_id}")
+def demo_auto_setup(connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
+    """Demo helper: given a connection_id, automatically
+    - fetches and stores all databases
+    - fetches and stores schemas for each database
+    - marks all databases and schemas as selected
+
+    This is intended to speed up demos by skipping manual multi-step setup.
+    """
+    # Validate connection id and ownership
+    try:
+        conn_uuid = uuid.UUID(connection_id)
+    except ValueError:
+        logger.warning("/snowflake/demo-auto-setup - invalid id %s", connection_id)
+        raise HTTPException(status_code=400, detail="Invalid connection ID format")
+
+    connection = db.query(SnowflakeConnection).filter(
+        SnowflakeConnection.id == conn_uuid,
+        SnowflakeConnection.org_id == current_user.org_id,
+        SnowflakeConnection.is_active == True
+    ).first()
+
+    if not connection:
+        logger.warning("/snowflake/demo-auto-setup - connection not found %s", conn_uuid)
+        raise HTTPException(status_code=404, detail="Snowflake connection not found")
+
+    # Step 1: Fetch and persist databases (reuse logic inline to avoid HTTP hop)
+    try:
+        sf_conn = snowflake.connector.connect(
+            user=connection.username,
+            password=connection.password,
+            account=connection.account,
+            warehouse=connection.warehouse,
+            role=connection.role
+        )
+        cur = sf_conn.cursor()
+        cur.execute("SHOW DATABASES")
+        database_names = [row[1] for row in cur.fetchall()]
+        cur.close()
+        sf_conn.close()
+    except Exception as e:
+        logger.exception("/snowflake/demo-auto-setup - fetch databases error: %s", str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Persist databases
+    for db_name in database_names:
+        existing_db = db.query(SnowflakeDatabase).filter(
+            SnowflakeDatabase.connection_id == conn_uuid,
+            SnowflakeDatabase.database_name == db_name
+        ).first()
+        if not existing_db:
+            existing_db = SnowflakeDatabase(
+                connection_id=conn_uuid,
+                database_name=db_name,
+                is_selected=True
+            )
+            db.add(existing_db)
+        else:
+            existing_db.is_selected = True
+
+    db.commit()
+
+    # Step 2: For each database, fetch schemas and persist them, mark selected
+    databases_rows = db.query(SnowflakeDatabase).filter(
+        SnowflakeDatabase.connection_id == conn_uuid
+    ).all()
+
+    for database_row in databases_rows:
+        try:
+            sf_conn = snowflake.connector.connect(
+                user=connection.username,
+                password=connection.password,
+                account=connection.account,
+                warehouse=connection.warehouse,
+                database=database_row.database_name,
+                role=connection.role
+            )
+            cur = sf_conn.cursor()
+            cur.execute("SHOW SCHEMAS")
+            schema_names = [row[1] for row in cur.fetchall()]
+            cur.close()
+            sf_conn.close()
+        except Exception as e:
+            logger.exception("/snowflake/demo-auto-setup - fetch schemas error for %s: %s", database_row.database_name, str(e))
+            raise HTTPException(status_code=400, detail=f"Failed fetching schemas for {database_row.database_name}: {str(e)}")
+
+        for schema_name in schema_names:
+            existing_schema = db.query(SnowflakeSchema).filter(
+                SnowflakeSchema.database_id == database_row.id,
+                SnowflakeSchema.schema_name == schema_name
+            ).first()
+            if not existing_schema:
+                existing_schema = SnowflakeSchema(
+                    database_id=database_row.id,
+                    schema_name=schema_name,
+                    is_selected=True
+                )
+                db.add(existing_schema)
+            else:
+                existing_schema.is_selected = True
+
+        db.commit()
+
+    logger.info("/snowflake/demo-auto-setup - completed for connection %s: %d databases", str(conn_uuid), len(database_names))
+    return {
+        "message": "Demo auto-setup completed",
+        "connection_id": str(conn_uuid),
+        "databases_count": len(database_names)
+    }
