@@ -66,6 +66,7 @@ def fetch_query_access_history_and_information_schema_columns(engine, org_id, co
         # Fetch query history
         query_history = (
             session.query(SnowflakeQueryRecord)
+            .filter_by(connection_id=conn_id, org_id=org_id)
             .filter(SnowflakeQueryRecord.created_at > last_processed)
             .all()
         )
