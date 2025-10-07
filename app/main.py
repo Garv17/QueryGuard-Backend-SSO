@@ -1,13 +1,14 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db, SessionLocal
-from app.snowflake_crawler import polling_worker
+from app.snowflake_crawler import polling_worker as snowflake_polling_worker
+from app.services.dbt_crawler import polling_worker as dbt_polling_worker
 from app.utils.models import SnowflakeConnection, SnowflakeJob
 import threading
-from app.api import auth, organizations, snowflake, github, jira, impact
+from app.api import auth, organizations, snowflake, github, jira, impact, dbt_cloud, chat
 import logging
 import sys
-from app.vector_db import init_org_vector_store
+from app.vector_db import upsert_lineage_embeddings
 from sqlalchemy import or_
 logging.basicConfig(
     level=logging.INFO,
@@ -117,6 +118,8 @@ app.include_router(snowflake.router)
 app.include_router(github.router)
 app.include_router(jira.router)
 app.include_router(impact.router)
+app.include_router(dbt_cloud.router)
+app.include_router(chat.router)
 
 @app.on_event("startup")
 async def startup_event():
@@ -126,9 +129,9 @@ async def startup_event():
     # Initialize database
     init_db()
     logger.info("📊 Database initialized")
-    ## Temporary vector database initialization for intelytics org
-    DB = init_org_vector_store("76d33fb3-6062-456b-a211-4aec9971f8be", "temp_lineage_data/lineage_output_deep.csv")
-    logger.info("Vector database initialized for intelytics org")
+    ## Initialize vector database for intelytics org from column_level_lineage table
+    # upsert_lineage_embeddings(org_id="76d33fb3-6062-456b-a211-4aec9971f8be")
+    # logger.info("Vector database initialized from column_level_lineage for intelytics org")
     
     # Sync jobs with connections
     sync_jobs_with_connections()
@@ -136,18 +139,31 @@ async def startup_event():
     # Start background polling worker
     app.state.worker_stop_event = threading.Event()
     app.state.worker_thread = threading.Thread(
-        target=polling_worker, 
+        target=snowflake_polling_worker, 
         args=(app.state.worker_stop_event,), 
         daemon=True,
         name="SnowflakeCrawlerWorker"
     )
     app.state.worker_thread.start()
+    # Start dbt crawler worker
+    app.state.dbt_worker_stop_event = threading.Event()
+    app.state.dbt_worker_thread = threading.Thread(
+        target=dbt_polling_worker,
+        args=(app.state.dbt_worker_stop_event, 30),
+        daemon=True,
+        name="DbtCrawlerWorker"
+    )
+    app.state.dbt_worker_thread.start()
     
     # Verify worker started
     if app.state.worker_thread.is_alive():
         logger.info("🔄 Snowflake crawler worker started")
     else:
         logger.error("❌ Failed to start Snowflake crawler worker")
+    if app.state.dbt_worker_thread.is_alive():
+        logger.info("🔄 dbt crawler worker started")
+    else:
+        logger.error("❌ Failed to start dbt crawler worker")
     
     logger.info("✅ Application startup completed")
 
@@ -166,6 +182,14 @@ async def shutdown_event():
                 logger.warning("⚠️  Worker thread did not stop gracefully")
             else:
                 logger.info("🔄 Snowflake crawler worker stopped")
+    if hasattr(app.state, 'dbt_worker_stop_event'):
+        app.state.dbt_worker_stop_event.set()
+        if hasattr(app.state, 'dbt_worker_thread') and app.state.dbt_worker_thread.is_alive():
+            app.state.dbt_worker_thread.join(timeout=10)
+            if app.state.dbt_worker_thread.is_alive():
+                logger.warning("⚠️  dbt worker thread did not stop gracefully")
+            else:
+                logger.info("🔄 dbt crawler worker stopped")
     
     logger.info("✅ Application shutdown completed")
 
