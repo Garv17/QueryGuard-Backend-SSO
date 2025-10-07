@@ -180,6 +180,109 @@ class JiraTicket(Base):
     creator = relationship("User", backref="created_jira_tickets")
 
 
+# dbt Cloud connection model
+
+class DbtCloudConnection(Base):
+    __tablename__ = "dbt_cloud_connections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    connection_name = Column(String(100), nullable=False)
+    api_key = Column(String(255), nullable=False)
+    account_id = Column(String(100), nullable=False)
+    base_url = Column(String(255), nullable=False)  # e.g., https://api.getdbt.com
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", backref="dbt_cloud_connections")
+
+
+# dbt Cloud metadata storage models
+
+class DbtProject(Base):
+    __tablename__ = "dbt_projects"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("dbt_cloud_connections.id"), nullable=False, index=True)
+    project_id = Column(String(100), nullable=False, index=True)
+    account_id = Column(String(100), nullable=False)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    state = Column(String(50), nullable=True)
+    type = Column(String(50), nullable=True)
+    dbt_project_subdirectory = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
+
+    organization = relationship("Organization", backref="dbt_projects")
+
+
+class DbtRun(Base):
+    __tablename__ = "dbt_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("dbt_cloud_connections.id"), nullable=False, index=True)
+    run_id = Column(String(100), nullable=False, index=True)
+    job_id = Column(String(100), nullable=True)
+    account_id = Column(String(100), nullable=True)
+    project_id = Column(String(100), nullable=True)
+    status = Column(String(50), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    duration = Column(String(50), nullable=True)
+    trigger = Column(String(100), nullable=True)
+
+
+class DbtManifestNode(Base):
+    __tablename__ = "dbt_manifest_nodes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("dbt_cloud_connections.id"), nullable=False, index=True)
+    run_id = Column(String(100), nullable=False, index=True)
+    unique_id = Column(String(500), nullable=False, index=True)
+    database = Column(String(200), nullable=True)
+    schema = Column(String(200), nullable=True)
+    name = Column(String(255), nullable=True)
+    package_name = Column(String(255), nullable=True)
+    path = Column(String(500), nullable=True)
+    original_file_path = Column(String(500), nullable=True)
+    resource_type = Column(String(100), nullable=True)
+    raw_code = Column(Text, nullable=True)
+    compiled_code = Column(Text, nullable=True)
+    downstream_models = Column(JSONB, nullable=True)
+    last_successful_run_at = Column(DateTime(timezone=True), nullable=True)
+    synced_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class DbtCrawlAudit(Base):
+    __tablename__ = "dbt_crawl_audit"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("dbt_jobs.id"), nullable=True, index=True)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("dbt_cloud_connections.id"), nullable=False, index=True)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(20), nullable=False, default="running")  # running|success|failed
+    nodes_inserted = Column(Integer, nullable=False, default=0)
+    error_message = Column(Text, nullable=True)
+
+
+class DbtJob(Base):
+    __tablename__ = "dbt_jobs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("dbt_cloud_connections.id"), unique=True, nullable=False, index=True)
+    cron_expression = Column(String(100), nullable=False)
+    last_run_time = Column(DateTime(timezone=True), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
 # Snowflake crawler job and audit models
 
 class SnowflakeJob(Base):
@@ -330,3 +433,23 @@ class LineageLoadWatermark(Base):
     connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="lineage_watermarks_conn_id")
       
 
+
+
+class GitHubPullRequestAnalysis(Base):
+    __tablename__ = "github_pr_analyses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    installation_id = Column(UUID(as_uuid=True), ForeignKey("github_installations.id"), nullable=False, index=True)
+    repository_id = Column(UUID(as_uuid=True), ForeignKey("github_repositories.id"), nullable=True, index=True)
+    repo_full_name = Column(String(200), nullable=False, index=True)
+    pr_number = Column(Integer, nullable=False, index=True)
+    pr_title = Column(String(500), nullable=True)
+    analysis_data = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Optional relationships
+    # organization = relationship("Organization", backref="pr_analyses")
+    # installation = relationship("GitHubInstallation", backref="pr_analyses")
+    # repository = relationship("GitHubRepository", backref="pr_analyses")
