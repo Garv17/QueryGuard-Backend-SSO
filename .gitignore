@@ -9,3 +9,4 @@ __pycache__/
 *.pyd
 chroma_collection_setup/
 test.ipynb
+lineage.log

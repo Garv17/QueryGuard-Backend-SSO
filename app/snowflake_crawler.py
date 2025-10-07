@@ -201,7 +201,20 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
         else:
             logger.info("ℹ️  Crawl completed: No new data found, watermark: %s", 
                        max_end.strftime("%Y-%m-%d %H:%M:%S"))
-            
+
+        # ---- Delete old InformationSchemacolumns first ----
+        deleted_count = (
+            db.query(InformationSchemacolumns)
+            .filter(
+                InformationSchemacolumns.org_id == conn.org_id,
+                InformationSchemacolumns.connection_id == conn.id,
+            )
+            .delete(synchronize_session=False)
+        )
+        logger.info("🧹 Deleted %d old InformationSchemacolumns rows for org_id=%s, conn_id=%s",
+                    deleted_count, conn.org_id, conn.id)
+        db.flush()  # ensure deletion is executed before insert
+         
         # ---- Insert InformationSchemacolumns ----
         column_objects = []
         for c in column_info_rows:

@@ -14,6 +14,7 @@ import logging
 import sys
 import os
 from datetime import datetime
+import uuid
 
 # Add the project root to Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
@@ -56,10 +57,12 @@ def fetch_query_access_history_and_information_schema_columns(engine, org_id, co
         # Get last processed timestamp (or default to very old date)
         last_processed = (
             session.query(func.max(LineageLoadWatermark.last_processed_at))
-            .filter_by(connection_id=conn_id, org_id=org_id, batch_id=batch_id)
+            .filter_by(connection_id=conn_id, org_id=org_id)
             .scalar()
         ) or datetime(1900, 1, 1)
 
+        logger.info("Filtering queries with last_processed timestamp: %s (org_id=%s, conn_id=%s)", 
+                   last_processed, org_id, conn_id)
         # Fetch query history
         query_history = (
             session.query(SnowflakeQueryRecord)

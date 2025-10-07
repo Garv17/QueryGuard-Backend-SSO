@@ -272,7 +272,6 @@ def apply_scd_type2(engine, model_class, current_df: pd.DataFrame, historical_df
         ids_to_update = [
         uuid.UUID(str(x)) for x in to_deactivate["id"].dropna().tolist()
         ]
-        logger.info("ids_to_update=%s", ids_to_update)
 
         if ids_to_update:
             with Session(engine) as session:
@@ -362,9 +361,6 @@ def lineage_builder(org_id, conn_id, batch_id):
         logger.info("PostgreSQL engine created successfully")
         
         fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df, historical_filter_clause_column_lineage_df = sqllineage_lineage.fetch_query_access_history_and_information_schema_columns(pg_engine, org_id, conn_id, batch_id)
-        # for col in fetch_query_history_df.select_dtypes(include=["datetimetz"]).columns:
-        #     fetch_query_history_df[col] = fetch_query_history_df[col].dt.tz_localize(None)
-        # fetch_query_history_df.to_excel("D:/Python Trial and Testing/Output Excel Files/fetch_query_history_df.xlsx", index=False)
         logger.info("fetch_query_history_df, information_schema_columns_df, historical_column_level_lineage_df and  historical_filter_clause_column_lineage_df retrieved")
         
         last_processed_at = fetch_query_history_df["created_at"].max()
@@ -440,7 +436,6 @@ def lineage_builder(org_id, conn_id, batch_id):
         consolidated_df["query_id"] = consolidated_df["query_id"].apply(
                 lambda x: str(x) if isinstance(x, list) else x
             )
-        # consolidated_df.to_excel("D:/Python Trial and Testing/Output Excel Files/consolidated_df.xlsx", index=False)
         logger.info("Consolidated query IDs converted to strings")
 
         filter_clause_df = pd.merge(consolidated_df, final_df, on="query_id", how="inner")
@@ -540,9 +535,3 @@ def lineage_builder(org_id, conn_id, batch_id):
         logger.critical("Full traceback: %s", traceback.format_exc())
         raise
 
-
-if __name__ == "__main__":
-    org_id = "76d33fb3-6062-456b-a211-4aec9971f8be"
-    conn_id = "1bdbf791-8709-4d7f-a900-0ff1f89de8fc"
-    batch_id = "4bd03fa5-7471-4eb7-8c6e-614992936375"
-    lineage_builder(org_id, conn_id, batch_id)
