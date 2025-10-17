@@ -1,8 +1,211 @@
 # POST /snowflake/test-connection → test connection
 # POST /snowflake/save-connection → save connection (after successful test)
-# GET /snowflake/fetch-databases → fetch all databases
-# GET /snowflake/fetch-schemas/{database} → fetch schemas for selected DB
-# POST /snowflake/save-schema-selection → save DB + schema selections
+# GET /snowflake/fetch-databases → fetch all databases (legacy)
+# GET /snowflake/fetch-schemas/{database} → fetch schemas for selected DB (legacy)
+# POST /snowflake/save-schema-selection → save DB + schema selections (legacy)
+# GET /snowflake/database-schema-structure/{connection_id} → fetch all databases with schemas in hierarchical format (NEW)
+# POST /snowflake/save-database-schema-selections → save database and schema selections from UI structure (NEW)
+
+"""
+Detailed Usage Scenarios:
+1. Select Specific Schemas Only - User selects only PUBLIC schema
+2. Deselect All Schemas - User deselects all schemas in a database
+3. Partial Schema Selection - Database has 4 schemas, user selects only 2
+4. Database-Only Update - Change database selection without affecting schemas
+5. Deselect Everything - User deselects all databases and schemas
+6. Invalid State Prevention - Handles invalid attempts gracefully
+7. Efficient UI Updates - UI only sends changed items
+
+Key Behaviors Documented:
+1. Database selection is ALWAYS determined by schema selections
+2. If schemas field is null, existing schema selections are preserved
+3. If schema is not mentioned in request, it's set to not selected
+4. Invalid states are automatically corrected
+5. UI can send minimal payload with only changed items
+
+CONSOLIDATED API USAGE EXAMPLES
+
+=== FETCH ENDPOINT ===
+GET /snowflake/database-schema-structure/{connection_id}
+
+Response Format:
+[
+  {
+    "id": "uuid",
+    "database_name": "SALES_DB",
+    "is_selected": false,
+    "created_at": "2024-01-01T00:00:00",
+    "schemas": [
+      {
+        "id": "uuid",
+        "schema_name": "PUBLIC",
+        "is_selected": false,
+        "created_at": "2024-01-01T00:00:00"
+      },
+      {
+        "id": "uuid",
+        "schema_name": "STAGING",
+        "is_selected": false,
+        "created_at": "2024-01-01T00:00:00"
+      }
+    ]
+  }
+]
+
+=== SAVE ENDPOINT ===
+POST /snowflake/save-database-schema-selections
+
+IMPORTANT RULE: A database can only be selected if at least one schema within it is selected.
+If no schemas are selected in a database, the database will automatically be deselected.
+
+=== USAGE SCENARIOS ===
+
+1. SELECT SPECIFIC SCHEMAS ONLY:
+   User wants to select only PUBLIC schema from SALES_DB
+   
+   Request:
+   {
+     "databases": [
+       {
+         "database_name": "SALES_DB",
+         "is_selected": true,  // Will be ignored - determined by schema selection
+         "schemas": [
+           {"schema_name": "PUBLIC", "is_selected": true},
+           {"schema_name": "STAGING", "is_selected": false}
+         ]
+       }
+     ]
+   }
+   
+   Result: SALES_DB is selected (because PUBLIC schema is selected)
+
+2. DESELECT ALL SCHEMAS IN A DATABASE:
+   User wants to deselect all schemas in SALES_DB
+   
+   Request:
+   {
+     "databases": [
+       {
+         "database_name": "SALES_DB",
+         "is_selected": false,  // Will be ignored - determined by schema selection
+         "schemas": [
+           {"schema_name": "PUBLIC", "is_selected": false},
+           {"schema_name": "STAGING", "is_selected": false}
+         ]
+       }
+     ]
+   }
+   
+   Result: SALES_DB is deselected (because no schemas are selected)
+
+3. PARTIAL SCHEMA SELECTION:
+   Database has 4 schemas, user wants to select only 2
+   
+   Request:
+   {
+     "databases": [
+       {
+         "database_name": "ANALYTICS_DB",
+         "is_selected": true,  // Will be ignored - determined by schema selection
+         "schemas": [
+           {"schema_name": "RAW", "is_selected": true},
+           {"schema_name": "CLEANED", "is_selected": true}
+           // SCHEMA3 and SCHEMA4 not mentioned = automatically deselected
+         ]
+       }
+     ]
+   }
+   
+   Result: ANALYTICS_DB is selected (because RAW and CLEANED schemas are selected)
+
+4. DATABASE-ONLY UPDATE (NO SCHEMA CHANGES):
+   User wants to change database selection without affecting schemas
+   
+   Request:
+   {
+     "databases": [
+       {
+         "database_name": "MARKETING_DB",
+         "is_selected": true,  // Will be validated against existing schema selections
+         "schemas": null  // No schema changes
+       }
+     ]
+   }
+   
+   Result: MARKETING_DB selection depends on existing schema selections
+
+5. DESELECT EVERYTHING:
+   User wants to deselect all databases and schemas
+   
+   Request:
+   {
+     "databases": [
+       {
+         "database_name": "SALES_DB",
+         "is_selected": false,  // Will be ignored - determined by schema selection
+         "schemas": [
+           {"schema_name": "PUBLIC", "is_selected": false},
+           {"schema_name": "STAGING", "is_selected": false}
+         ]
+       },
+       {
+         "database_name": "ANALYTICS_DB",
+         "is_selected": false,  // Will be ignored - determined by schema selection
+         "schemas": [
+           {"schema_name": "RAW", "is_selected": false},
+           {"schema_name": "CLEANED", "is_selected": false}
+         ]
+       }
+     ]
+   }
+   
+   Result: All databases and schemas are deselected
+
+6. INVALID STATE PREVENTION:
+   User tries to select database without selecting any schemas
+   
+   Request:
+   {
+     "databases": [
+       {
+         "database_name": "SALES_DB",
+         "is_selected": true,  // Invalid - no schemas selected
+         "schemas": [
+           {"schema_name": "PUBLIC", "is_selected": false},
+           {"schema_name": "STAGING", "is_selected": false}
+         ]
+       }
+     ]
+   }
+   
+   Result: SALES_DB is automatically deselected (warning logged)
+
+7. EFFICIENT UI UPDATES:
+   UI only sends changed items to minimize payload
+   
+   Request (only changed schemas):
+   {
+     "databases": [
+       {
+         "database_name": "SALES_DB",
+         "is_selected": true,  // Will be ignored - determined by schema selection
+         "schemas": [
+           {"schema_name": "PUBLIC", "is_selected": true}  // Only changed schema
+           // Other schemas not mentioned = maintain current state
+         ]
+       }
+     ]
+   }
+   
+   Result: Only PUBLIC schema selection is updated, database selection follows
+
+=== KEY BEHAVIORS ===
+- Database selection is ALWAYS determined by schema selections
+- If schemas field is null, existing schema selections are preserved
+- If schema is not mentioned in request, it's set to not selected
+- Invalid states (database selected without schemas) are automatically corrected
+- UI can send minimal payload with only changed items
+"""
 
 from fastapi import APIRouter, HTTPException, Depends, status, Request
 from sqlalchemy.orm import Session
@@ -110,6 +313,37 @@ class SchemaResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class SchemaNode(BaseModel):
+    id: UUID
+    schema_name: str
+    is_selected: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class DatabaseNode(BaseModel):
+    id: UUID
+    database_name: str
+    is_selected: bool
+    created_at: datetime
+    schemas: List[SchemaNode] = []
+
+    class Config:
+        from_attributes = True
+
+class SchemaSelectionItem(BaseModel):
+    schema_name: str
+    is_selected: bool
+
+class DatabaseSelectionItem(BaseModel):
+    database_name: str
+    is_selected: bool
+    schemas: Optional[List[SchemaSelectionItem]] = None  # Only include if database is selected
+
+class DatabaseSchemaSelectionRequest(BaseModel):
+    databases: List[DatabaseSelectionItem]
 
 
 # --- Endpoints ---
@@ -484,6 +718,217 @@ def get_selected_schemas(connection_id: str, database_name: str, current_user: U
     logger.debug("/snowflake/selected-schemas - count=%d", len(selected_schemas))
     return selected_schemas
 
+
+@router.get("/database-schema-structure/{connection_id}", response_model=List[DatabaseNode])
+def fetch_database_schema_structure(connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
+    """Fetch all databases with their schemas in hierarchical format"""
+    try:
+        conn_uuid = uuid.UUID(connection_id)
+    except ValueError:
+        logger.warning("/snowflake/database-schema-structure - invalid id %s", connection_id)
+        raise HTTPException(status_code=400, detail="Invalid connection ID format")
+
+    # Get connection details
+    connection = db.query(SnowflakeConnection).filter(
+        SnowflakeConnection.id == conn_uuid,
+        SnowflakeConnection.org_id == current_user.org_id,
+        SnowflakeConnection.is_active == True
+    ).first()
+    
+    if not connection:
+        logger.warning("/snowflake/database-schema-structure - connection not found %s", conn_uuid)
+        raise HTTPException(status_code=404, detail="Snowflake connection not found")
+
+    try:
+        # Connect to Snowflake and fetch databases
+        snowflake_conn = snowflake.connector.connect(
+            user=connection.username,
+            password=connection.password,
+            account=connection.account,
+            warehouse=connection.warehouse,
+            role=connection.role
+        )
+        cur = snowflake_conn.cursor()
+        cur.execute("SHOW DATABASES")
+        databases = [row[1] for row in cur.fetchall()]
+        cur.close()
+        snowflake_conn.close()
+        
+        # Build tree structure
+        database_nodes = []
+        
+        for db_name in databases:
+            # Get or create database record
+            database = db.query(SnowflakeDatabase).filter(
+                SnowflakeDatabase.connection_id == conn_uuid,
+                SnowflakeDatabase.database_name == db_name
+            ).first()
+            
+            if not database:
+                database = SnowflakeDatabase(
+                    connection_id=conn_uuid,
+                    database_name=db_name
+                )
+                db.add(database)
+                db.flush()  # Get the ID
+            
+            # Fetch schemas for this database
+            try:
+                snowflake_conn = snowflake.connector.connect(
+                    user=connection.username,
+                    password=connection.password,
+                    account=connection.account,
+                    warehouse=connection.warehouse,
+                    database=db_name,
+                    role=connection.role
+                )
+                cur = snowflake_conn.cursor()
+                cur.execute("SHOW SCHEMAS")
+                schemas = [row[1] for row in cur.fetchall()]
+                cur.close()
+                snowflake_conn.close()
+                
+                # Store schemas in our database and build schema nodes
+                schema_nodes = []
+                for schema_name in schemas:
+                    existing_schema = db.query(SnowflakeSchema).filter(
+                        SnowflakeSchema.database_id == database.id,
+                        SnowflakeSchema.schema_name == schema_name
+                    ).first()
+                    
+                    if not existing_schema:
+                        new_schema = SnowflakeSchema(
+                            database_id=database.id,
+                            schema_name=schema_name
+                        )
+                        db.add(new_schema)
+                        db.flush()  # Get the ID
+                        schema_nodes.append(SchemaNode(
+                            id=new_schema.id,
+                            schema_name=new_schema.schema_name,
+                            is_selected=new_schema.is_selected,
+                            created_at=new_schema.created_at
+                        ))
+                    else:
+                        schema_nodes.append(SchemaNode(
+                            id=existing_schema.id,
+                            schema_name=existing_schema.schema_name,
+                            is_selected=existing_schema.is_selected,
+                            created_at=existing_schema.created_at
+                        ))
+                
+                # Create database node with schemas
+                database_nodes.append(DatabaseNode(
+                    id=database.id,
+                    database_name=database.database_name,
+                    is_selected=database.is_selected,
+                    created_at=database.created_at,
+                    schemas=schema_nodes
+                ))
+                
+            except Exception as e:
+                logger.warning("/snowflake/database-schema-structure - error fetching schemas for %s: %s", db_name, str(e))
+                # Still add database node but with empty schemas
+                database_nodes.append(DatabaseNode(
+                    id=database.id,
+                    database_name=database.database_name,
+                    is_selected=database.is_selected,
+                    created_at=database.created_at,
+                    schemas=[]
+                ))
+        
+        db.commit()
+        logger.info("/snowflake/database-schema-structure - fetched %d databases with schemas", len(database_nodes))
+        return database_nodes
+        
+    except Exception as e:
+        logger.exception("/snowflake/database-schema-structure - error: %s", str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/save-database-schema-selections")
+def save_database_schema_selections(selection: DatabaseSchemaSelectionRequest, connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
+    """Save database and schema selections from UI structure with flexible selection options"""
+    try:
+        conn_uuid = uuid.UUID(connection_id)
+    except ValueError:
+        logger.warning("/snowflake/save-database-schema-selections - invalid id %s", connection_id)
+        raise HTTPException(status_code=400, detail="Invalid connection ID format")
+
+    # Verify connection belongs to user's org
+    connection = db.query(SnowflakeConnection).filter(
+        SnowflakeConnection.id == conn_uuid,
+        SnowflakeConnection.org_id == current_user.org_id,
+        SnowflakeConnection.is_active == True
+    ).first()
+    
+    if not connection:
+        logger.warning("/snowflake/save-database-schema-selections - connection not found %s", conn_uuid)
+        raise HTTPException(status_code=404, detail="Snowflake connection not found")
+
+    try:
+        # Process each database selection
+        for db_selection in selection.databases:
+            # Get or create database record
+            database = db.query(SnowflakeDatabase).filter(
+                SnowflakeDatabase.connection_id == conn_uuid,
+                SnowflakeDatabase.database_name == db_selection.database_name
+            ).first()
+            
+            if not database:
+                logger.warning("/snowflake/save-database-schema-selections - database not found %s", db_selection.database_name)
+                continue  # Skip if database doesn't exist
+            
+            # Handle schema selections - only process if schemas are provided
+            if db_selection.schemas is not None:
+                # Get all schemas for this database
+                schemas = db.query(SnowflakeSchema).filter(
+                    SnowflakeSchema.database_id == database.id
+                ).all()
+                
+                # Create a map of schema names to selection status for efficient lookup
+                schema_selection_map = {schema_item.schema_name: schema_item.is_selected 
+                                      for schema_item in db_selection.schemas}
+                
+                # Update schema selections based on the provided data
+                any_schema_selected = False
+                for schema in schemas:
+                    if schema.schema_name in schema_selection_map:
+                        schema.is_selected = schema_selection_map[schema.schema_name]
+                        if schema.is_selected:
+                            any_schema_selected = True
+                    else:
+                        # If schema is not mentioned in the request, set to not selected
+                        schema.is_selected = False
+                
+                # Database is only selected if at least one schema is selected
+                database.is_selected = any_schema_selected
+            else:
+                # If no schemas provided in request, don't change schema selections
+                # But ensure database selection follows the rule: database selected only if schemas are selected
+                schemas = db.query(SnowflakeSchema).filter(
+                    SnowflakeSchema.database_id == database.id
+                ).all()
+                
+                # Check if any existing schema is selected
+                any_schema_selected = any(schema.is_selected for schema in schemas)
+                
+                # Database selection must follow schema selection rule
+                if db_selection.is_selected and not any_schema_selected:
+                    # User tried to select database but no schemas are selected - invalid state
+                    logger.warning("/snowflake/save-database-schema-selections - cannot select database %s without selecting schemas", db_selection.database_name)
+                    database.is_selected = False
+                else:
+                    database.is_selected = any_schema_selected
+        
+        db.commit()
+        logger.info("/snowflake/save-database-schema-selections - saved selections for %d databases", len(selection.databases))
+        return {"message": "Database and schema selections saved successfully"}
+        
+    except Exception as e:
+        db.rollback()
+        logger.exception("/snowflake/save-database-schema-selections - error: %s", str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # --- Demo/Automation Endpoint ---
