@@ -8,3 +8,4 @@ __pycache__/
 *.pyo
 *.pyd
 chroma_collection_setup/
+app/services/lineage_builder/test.ipynb
