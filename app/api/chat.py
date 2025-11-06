@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 from app.vector_db import get_qa_chain
 from app.api.auth import get_current_user
 from app.utils.models import User
-from app.tools import build_org_lineage_tool, build_org_query_history_tool, LLM
+from app.tools import build_org_lineage_tool, build_org_query_history_tool, build_org_pr_repo_tool, LLM
 from app.services.impact_analysis import fetch_queries
 import logging
 from langchain.agents import initialize_agent, AgentType
@@ -29,6 +29,7 @@ class ChatResponse(BaseModel):
     conversation_id: Optional[str] = None
     impacted_query_ids: Optional[List[str]] = []
     impacted_queries: Optional[List[Dict[str, Any]]] = []
+    pr_repo_data: Optional[Dict[str, Any]] = None
 
 class ChatConversation(BaseModel):
     conversation_id: str
@@ -64,15 +65,15 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
 
         # LLM classification: decide whether to use tools (lineage/impact) or respond conversationally (other)
         classify_prompt = (
-            "You are a classifier. Decide if the user's message requires using specialized tools for data lineage (extract_lineage) "
-            "or query impact analysis (query_history_search).\n"
-            "Respond with exactly one word: lineage, impact, or other.\n\n"
+            "You are a classifier. Decide if the user's message requires using specialized tools for: "
+            "data lineage (extract_lineage), query impact analysis (query_history_search), or PR/Repo analysis (pr_repo_analysis).\n"
+            "Respond with exactly one word: lineage, impact, pr, or other.\n\n"
             f"Message: {request.message}"
         )
         classification = LLM.invoke(classify_prompt)
         classification_label = (getattr(classification, "content", str(classification)) or "other").strip().lower()
 
-        if classification_label not in {"lineage", "impact"}:
+        if classification_label not in {"lineage", "impact", "pr"}:
             # Conversational reply without tools
             persona_prompt = (
                 "SYSTEM: You are Zane AI, a helpful assistant for data lineage and change-impact analysis.\n"
@@ -90,14 +91,16 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
                 conversation_id=None,
                 impacted_query_ids=[],
                 impacted_queries=[],
+                pr_repo_data=None,
             )
 
         # Build org-aware tools and delegate tool selection to the LLM agent
         lineage_tool = build_org_lineage_tool(org_id=resolved_org_id, k=request.k or 5)
         query_history_tool = build_org_query_history_tool(org_id=resolved_org_id, max_iters=5)
+        pr_repo_tool = build_org_pr_repo_tool(org_id=resolved_org_id, default_limit=10)
 
         agent = initialize_agent(
-            tools=[lineage_tool, query_history_tool],
+            tools=[lineage_tool, query_history_tool, pr_repo_tool],
             llm=LLM,
             agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             verbose=True,
@@ -116,7 +119,9 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
         # Nudge the agent to preferred tool if classification is specific
         preferred_hint = (
             "\nPREFERRED_TOOL: query_history_search\n" if classification_label == "impact" else (
-                "\nPREFERRED_TOOL: extract_lineage\n" if classification_label == "lineage" else ""
+                "\nPREFERRED_TOOL: extract_lineage\n" if classification_label == "lineage" else (
+                    "\nPREFERRED_TOOL: pr_repo_analysis\n" if classification_label == "pr" else ""
+                )
             )
         )
         agent_query = f"{guidance}{preferred_hint}\nUser question: {query}"
@@ -141,12 +146,23 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
             impacted_query_ids = []
             impacted_queries = []
 
+        # Best-effort: extract PR/Repo tool payload if present (DATA:\n{...})
+        pr_repo_data: Optional[Dict[str, Any]] = None
+        try:
+            import re as _re2, json as _json2
+            m = _re2.search(r"DATA:\n(\{[\s\S]*\})", response_text)
+            if m:
+                pr_repo_data = _json2.loads(m.group(1))
+        except Exception:
+            pr_repo_data = None
+
         return ChatResponse(
             response=response_text,
             sources=[],  # Tool outputs include their own context; no structured source docs here
             conversation_id=None,
             impacted_query_ids=impacted_query_ids,
             impacted_queries=impacted_queries,
+            pr_repo_data=pr_repo_data,
         )
         
     except Exception as e:
