@@ -2,7 +2,11 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from app.vector_db import get_qa_chain
+from app.api.auth import get_current_user
+from app.utils.models import User
+from app.tools import build_org_lineage_tool, build_org_query_history_tool, LLM
 import logging
+from langchain.agents import initialize_agent, AgentType
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +18,6 @@ class ChatMessage(BaseModel):
     timestamp: Optional[str] = None
 
 class ChatRequest(BaseModel):
-    org_id: str
     message: str
     k: Optional[int] = 5  # Number of documents to retrieve for context
     conversation_history: Optional[List[ChatMessage]] = []
@@ -32,7 +35,7 @@ class ChatConversation(BaseModel):
     updated_at: Optional[str] = None
 
 @router.post("/query", response_model=ChatResponse)
-async def chat_with_llm(request: ChatRequest):
+async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_current_user)):
     """
     Chat with LLM using vector database context for a specific organization.
     
@@ -43,49 +46,41 @@ async def chat_with_llm(request: ChatRequest):
         ChatResponse with LLM response and source documents
     """
     try:
-        logger.info(f"Chat request for org_id: {request.org_id}, message: {request.message[:100]}...")
-        
-        # Validate org_id
-        if not request.org_id:
-            raise HTTPException(status_code=400, detail="org_id is required")
-        
-        # Get QA chain for the organization
-        qa_chain = get_qa_chain(request.org_id, k=request.k)
-        
+        # Resolve organization strictly from authenticated user
+        resolved_org_id = str(current_user.org_id)
+
+        logger.info(f"Chat request for org_id: {resolved_org_id}, message: {request.message[:100]}...")
+
         # Prepare the query with conversation context if provided
         query = request.message
         if request.conversation_history:
-            # Add conversation context to the query
-            context_messages = []
-            for msg in request.conversation_history[-5:]:  # Keep last 5 messages for context
-                context_messages.append(f"{msg.role}: {msg.content}")
-            
+            context_messages = [f"{msg.role}: {msg.content}" for msg in request.conversation_history[-5:]]
             if context_messages:
                 context = "\n".join(context_messages)
                 query = f"Previous conversation context:\n{context}\n\nCurrent question: {request.message}"
-        
-        # Invoke the QA chain
-        result = qa_chain.invoke({"query": query})
-        
-        # Extract response and sources
-        response_text = result.get("result", "")
-        source_documents = result.get("source_documents", [])
-        
-        # Format source documents
-        sources = []
-        for doc in source_documents:
-            source_info = {
-                "content": doc.page_content,
-                "metadata": doc.metadata
-            }
-            sources.append(source_info)
-        
-        logger.info(f"Chat response generated with {len(sources)} sources")
-        
+
+        # Build org-aware tools and delegate tool selection to the LLM agent
+        lineage_tool = build_org_lineage_tool(org_id=resolved_org_id, k=request.k or 5)
+        query_history_tool = build_org_query_history_tool(org_id=resolved_org_id, max_iters=5)
+
+        agent = initialize_agent(
+            tools=[lineage_tool, query_history_tool],
+            llm=LLM,
+            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            verbose=True,
+        )
+
+        agent_result = agent.invoke(query)
+        # LangChain agents often return dicts with `output`; fallback to str
+        if isinstance(agent_result, dict) and "output" in agent_result:
+            response_text = agent_result.get("output", "")
+        else:
+            response_text = str(agent_result)
+
         return ChatResponse(
             response=response_text,
-            sources=sources,
-            conversation_id=None  # Could be implemented for conversation persistence
+            sources=[],  # Tool outputs include their own context; no structured source docs here
+            conversation_id=None,
         )
         
     except Exception as e:
