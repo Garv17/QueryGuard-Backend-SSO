@@ -97,7 +97,11 @@ def build_org_query_history_tool(org_id: str, max_iters: Optional[int] = 5) -> T
     return Tool(
         name="query_history_search",
         func=_fn,
-        description="Analyze schema/SQL changes and find impacted queries. Input is a natural-language description of a change (e.g., 'I am going to remove column X from table Y' or 'I will drop column customer.email'). Returns impacted queries from query history.",
+        description=(
+            "Analyze schema/SQL changes and find impacted queries. Input is a natural-language description of a change "
+            "(e.g., 'I am going to remove column X from table Y'). ALWAYS return a numbered list with each item's "
+            "query_id and a short SQL preview (first ~200 chars)."
+        ),
     )
 
 

@@ -5,6 +5,7 @@ from app.vector_db import get_qa_chain
 from app.api.auth import get_current_user
 from app.utils.models import User
 from app.tools import build_org_lineage_tool, build_org_query_history_tool, LLM
+from app.services.impact_analysis import fetch_queries
 import logging
 from langchain.agents import initialize_agent, AgentType
 
@@ -26,6 +27,8 @@ class ChatResponse(BaseModel):
     response: str
     sources: List[Dict[str, Any]]
     conversation_id: Optional[str] = None
+    impacted_query_ids: Optional[List[str]] = []
+    impacted_queries: Optional[List[Dict[str, Any]]] = []
 
 class ChatConversation(BaseModel):
     conversation_id: str
@@ -59,6 +62,36 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
                 context = "\n".join(context_messages)
                 query = f"Previous conversation context:\n{context}\n\nCurrent question: {request.message}"
 
+        # LLM classification: decide whether to use tools (lineage/impact) or respond conversationally (other)
+        classify_prompt = (
+            "You are a classifier. Decide if the user's message requires using specialized tools for data lineage (extract_lineage) "
+            "or query impact analysis (query_history_search).\n"
+            "Respond with exactly one word: lineage, impact, or other.\n\n"
+            f"Message: {request.message}"
+        )
+        classification = LLM.invoke(classify_prompt)
+        classification_label = (getattr(classification, "content", str(classification)) or "other").strip().lower()
+
+        if classification_label not in {"lineage", "impact"}:
+            # Conversational reply without tools
+            persona_prompt = (
+                "SYSTEM: You are Zane AI, a helpful assistant for data lineage and change-impact analysis.\n"
+                "- Be concise.\n"
+                "- Do NOT invent lineage or impacts without analysis.\n"
+                "- If the user hasn't asked for lineage/impact, introduce capabilities briefly and ask a clarifying question.\n\n"
+                f"USER: {request.message}\n"
+                "ASSISTANT:"
+            )
+            llm_reply = LLM.invoke(persona_prompt)
+            reply_text = getattr(llm_reply, "content", str(llm_reply))
+            return ChatResponse(
+                response=reply_text,
+                sources=[],
+                conversation_id=None,
+                impacted_query_ids=[],
+                impacted_queries=[],
+            )
+
         # Build org-aware tools and delegate tool selection to the LLM agent
         lineage_tool = build_org_lineage_tool(org_id=resolved_org_id, k=request.k or 5)
         query_history_tool = build_org_query_history_tool(org_id=resolved_org_id, max_iters=5)
@@ -70,17 +103,50 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
             verbose=True,
         )
 
-        agent_result = agent.invoke(query)
+        # Strong guidance to the agent on tool selection and output format
+        guidance = (
+            "SYSTEM ROLE: You are Zane AI, an assistant that helps analyze data lineage and change impacts.\n"
+            "BEHAVIOR:\n"
+            "- Be concise and helpful.\n"
+            "- If the user greets you (e.g., 'hi', 'hello'), respond with a short intro of who you are and how you can help (lineage Q&A and query impact analysis).\n"
+            "- If the question is about schema/column changes or 'impacted queries', you MUST use the query_history_search tool.\n"
+            "- When reporting impacted queries, return a concise, numbered list with a short SQL preview for each query, not just IDs.\n"
+            "- If it's a pure lineage question, use the extract_lineage tool.\n"
+        )
+        # Nudge the agent to preferred tool if classification is specific
+        preferred_hint = (
+            "\nPREFERRED_TOOL: query_history_search\n" if classification_label == "impact" else (
+                "\nPREFERRED_TOOL: extract_lineage\n" if classification_label == "lineage" else ""
+            )
+        )
+        agent_query = f"{guidance}{preferred_hint}\nUser question: {query}"
+
+        agent_result = agent.invoke(agent_query)
         # LangChain agents often return dicts with `output`; fallback to str
         if isinstance(agent_result, dict) and "output" in agent_result:
             response_text = agent_result.get("output", "")
         else:
             response_text = str(agent_result)
 
+        # Best-effort: extract query IDs from the response text and fetch full queries
+        impacted_query_ids: List[str] = []
+        impacted_queries: List[Dict[str, Any]] = []
+        try:
+            import re as _re
+            # Match UUID-like ids commonly used in results
+            impacted_query_ids = list(dict.fromkeys(_re.findall(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", response_text, flags=_re.I)))
+            if impacted_query_ids:
+                impacted_queries = fetch_queries(impacted_query_ids) or []
+        except Exception:
+            impacted_query_ids = []
+            impacted_queries = []
+
         return ChatResponse(
             response=response_text,
             sources=[],  # Tool outputs include their own context; no structured source docs here
             conversation_id=None,
+            impacted_query_ids=impacted_query_ids,
+            impacted_queries=impacted_queries,
         )
         
     except Exception as e:
