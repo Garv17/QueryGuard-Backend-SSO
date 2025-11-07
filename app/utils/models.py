@@ -27,6 +27,7 @@ class User(Base):
     email = Column(String(100), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    role = Column(String(50), nullable=False, default="MEMBER", index=True)  # PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, ORGANIZATION_ADMIN, MEMBER
     password_reset_otp = Column(String(6), nullable=True)
     reset_otp_expires = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)

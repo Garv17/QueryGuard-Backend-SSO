@@ -6,15 +6,16 @@
 # GET /auth/me → get current user info
 
 from fastapi import APIRouter, HTTPException, Depends, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from uuid import UUID
-from jose import jwt, JWTError
+from jose import jwt
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.utils.models import User, UserToken, Organization
+from app.utils.rbac import MEMBER
+from app.utils.auth_deps import get_current_user, SECRET_KEY, ALGORITHM
 import hashlib
 import uuid
 import os
@@ -25,11 +26,7 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 logger = logging.getLogger("auth")
 
 # --- Config ---
-SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey") 
-ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
-
-security = HTTPBearer()
 
 
 # --- Models ---
@@ -56,6 +53,7 @@ class UserResponse(BaseModel):
     username: str
     email: str
     org_id: UUID
+    role: str
 
     class Config:
         from_attributes = True
@@ -75,43 +73,14 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def verify_token(raw_token: str):
-    try:
-        payload = jwt.decode(raw_token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
-):
-    raw_token = credentials.credentials
-    payload = verify_token(raw_token)
-    user_id: str = payload.get("sub")
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
-
-    # Check if token exists and is not revoked
-    token_record = db.query(UserToken).filter(
-        UserToken.token == raw_token,
-        UserToken.is_revoked == False,
-        UserToken.expires_at > datetime.utcnow()
-    ).first()
-    
-    if not token_record:
-        raise HTTPException(status_code=401, detail="Token revoked or expired")
-
-    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found or inactive")
-    
-    return user
-
 
 # --- Endpoints ---
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 def signup(user: UserSignup, db: Session = Depends(get_db), request: Request = None):
+    """
+    Public signup endpoint - creates users with MEMBER role only.
+    For creating users with other roles, use /users endpoint (requires authentication and appropriate role).
+    """
     logger.info("POST /auth/signup - attempt for username=%s org_id=%s ip=%s", user.username, user.org_id, request.client.host if request and request.client else "unknown")
     # Validate org_id format
     try:
@@ -141,18 +110,20 @@ def signup(user: UserSignup, db: Session = Depends(get_db), request: Request = N
         logger.warning("/auth/signup - email exists: %s", user.email)
         raise HTTPException(status_code=400, detail="Email already exists")
 
+    # Public signup always creates MEMBER role users
     new_user = User(
         username=user.username,
         email=user.email,
         password_hash=hash_password(user.password),
-        org_id=org_uuid
+        org_id=org_uuid,
+        role=MEMBER
     )
     
     try:
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
-        logger.info("/auth/signup - user created id=%s", new_user.id)
+        logger.info("/auth/signup - user created id=%s role=%s", new_user.id, new_user.role)
         return {"message": "User registered successfully"}
     except IntegrityError:
         db.rollback()
