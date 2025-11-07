@@ -215,7 +215,8 @@ from pydantic import BaseModel, validator
 import snowflake.connector
 from app.database import get_db
 from app.utils.models import SnowflakeConnection, SnowflakeDatabase, SnowflakeSchema, User, SnowflakeJob
-from app.api.auth import get_current_user
+from app.utils.auth_deps import get_current_user
+from app.utils.rbac import require_connector_access, check_organization_access
 import uuid
 from uuid import UUID
 from datetime import datetime
@@ -348,7 +349,7 @@ class DatabaseSchemaSelectionRequest(BaseModel):
 
 # --- Endpoints ---
 @router.post("/test-connection")
-def snowflake_test_connection(conn: SnowflakeConn, current_user: User = Depends(get_current_user), request: Request = None):
+def snowflake_test_connection(conn: SnowflakeConn, current_user: User = Depends(require_connector_access()), request: Request = None):
     """Test Snowflake connection before saving"""
     success = test_connection(
         account=conn.account,
@@ -360,7 +361,7 @@ def snowflake_test_connection(conn: SnowflakeConn, current_user: User = Depends(
 
 
 @router.post("/save-connection", response_model=ConnectionResponse, status_code=status.HTTP_201_CREATED)
-def save_connection(conn: SnowflakeConn, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
+def save_connection(conn: SnowflakeConn, current_user: User = Depends(require_connector_access()), db: Session = Depends(get_db), request: Request = None):
     """Save Snowflake connection after successful test"""
     # Test connection before saving
     test_connection(conn.account, conn.username, conn.password, conn.warehouse)
@@ -576,7 +577,7 @@ def fetch_schemas(connection_id: str, database_name: str, current_user: User = D
 
 
 @router.post("/save-database-selection")
-def save_database_selection(selection: DatabaseSelection, connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
+def save_database_selection(selection: DatabaseSelection, connection_id: str, current_user: User = Depends(require_connector_access()), db: Session = Depends(get_db), request: Request = None):
     """Save database selections for a connection"""
     try:
         conn_uuid = uuid.UUID(connection_id)
@@ -609,7 +610,7 @@ def save_database_selection(selection: DatabaseSelection, connection_id: str, cu
 
 
 @router.post("/save-schema-selection")
-def save_schema_selection(selection: SchemaSelection, connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
+def save_schema_selection(selection: SchemaSelection, connection_id: str, current_user: User = Depends(require_connector_access()), db: Session = Depends(get_db), request: Request = None):
     """Save schema selections for a specific database"""
     try:
         conn_uuid = uuid.UUID(connection_id)
@@ -847,7 +848,7 @@ def fetch_database_schema_structure(connection_id: str, current_user: User = Dep
 
 
 @router.post("/save-database-schema-selections")
-def save_database_schema_selections(selection: DatabaseSchemaSelectionRequest, connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
+def save_database_schema_selections(selection: DatabaseSchemaSelectionRequest, connection_id: str, current_user: User = Depends(require_connector_access()), db: Session = Depends(get_db), request: Request = None):
     """Save database and schema selections from UI structure with flexible selection options"""
     try:
         conn_uuid = uuid.UUID(connection_id)
@@ -933,7 +934,7 @@ def save_database_schema_selections(selection: DatabaseSchemaSelectionRequest, c
 
 # --- Demo/Automation Endpoint ---
 @router.post("/demo-auto-setup/{connection_id}")
-def demo_auto_setup(connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
+def demo_auto_setup(connection_id: str, current_user: User = Depends(require_connector_access()), db: Session = Depends(get_db), request: Request = None):
     """Demo helper: given a connection_id, automatically
     - fetches and stores all databases
     - fetches and stores schemas for each database

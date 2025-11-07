@@ -5,6 +5,7 @@ A FastAPI-based backend for QueryGuardAI - a data lineage and impact analysis to
 ## Features
 
 - User authentication with JWT tokens
+- **Role-Based Access Control (RBAC)** with four role levels
 - Database integration with PostgreSQL
 - RESTful API endpoints for auth operations
 - Secure password hashing and token management
@@ -51,7 +52,12 @@ export SECRET_KEY="your-secret-key-here"
 createdb queryguard
 ```
 
-6. Run the application:
+6. Initialize the first PRODUCT_SUPPORT_ADMIN user:
+```bash
+python scripts/init_product_support_admin.py
+```
+
+7. Run the application:
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
@@ -60,14 +66,22 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### Authentication
 
-- `POST /auth/signup` - Register a new user (requires valid org_id)
+- `POST /auth/signup` - Register a new user (creates MEMBER role, requires valid org_id)
 - `POST /auth/login` - Login and get JWT token
 - `POST /auth/forgot-password` - Generate password reset token
 - `POST /auth/reset-password` - Reset password with token
 - `POST /auth/logout` - Logout and revoke JWT
-- `GET /auth/me` - Get current user information
+- `GET /auth/me` - Get current user information (includes role)
 
-### Organizations (Admin Only)
+### User Management (Admin Only)
+
+- `POST /users` - Create a new user with role assignment (requires PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, or ORGANIZATION_ADMIN)
+- `GET /users` - List users (filtered by organization, optional org_id query parameter)
+- `GET /users/{user_id}` - Get user details by ID
+- `PUT /users/{user_id}` - Update user (username, email, role, password, is_active)
+- `DELETE /users/{user_id}` - Deactivate user (soft delete)
+
+### Organizations (PRODUCT_SUPPORT_ADMIN Only)
 
 - `POST /organizations` - Create a new organization
 - `GET /organizations` - List all organizations
@@ -383,9 +397,54 @@ The PR processing endpoint:
 - Adds comment "Changes Processed By Query Guard AI" to PR
 - Requires proper GitHub App access token (needs JWT implementation)
 
+## Role-Based Access Control (RBAC)
+
+QueryGuardAI Backend implements a comprehensive RBAC system with four role levels:
+
+1. **PRODUCT_SUPPORT_ADMIN** - Full product access, cross-organization (QueryGuardAI product owners)
+2. **SYSTEM_ADMIN** - Full product access within own organization only (client administrators)
+3. **ORGANIZATION_ADMIN** - Organization-level access, can create MEMBER users
+4. **MEMBER** - View-only access within own organization
+
+### Key RBAC Features:
+- Role-based endpoint access control
+- Organization isolation (users can only access their own org unless PRODUCT_SUPPORT_ADMIN)
+- Role assignment validation (users can only assign roles they're permitted to assign)
+- Connector management restrictions (MEMBER role cannot create/manage connectors)
+
+For detailed RBAC documentation, see [docs/RBAC.md](docs/RBAC.md).
+
+### Initialization
+
+To create the first PRODUCT_SUPPORT_ADMIN user and QueryGuardAI organization:
+
+**Option 1: Run the script**
+```bash
+python scripts/init_product_support_admin.py
+```
+
+**Option 2: Use the API endpoint (Temporary)**
+```bash
+POST /init-setup
+```
+
+⚠️ **WARNING:** The API endpoint should be removed or protected after initial setup!
+
+**Default Credentials:**
+- Username: `admin`
+- Email: `admin@queryguardai.com`
+- Password: `Admin@123`
+- Organization: `QueryGuardAI`
+
+⚠️ **IMPORTANT:** Change the default password after first login!
+
+**Note:** The initialization is idempotent - running it multiple times will not create duplicate organizations or users.
+
 ## Security Notes
 
 - Passwords are hashed using SHA-256
 - JWT tokens are stored in the database for revocation capability
 - Password reset OTPs expire after 60 minutes
 - All sensitive operations require authentication
+- Role-based access control enforced on all endpoints
+- Organization-level data isolation
