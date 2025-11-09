@@ -1,8 +1,25 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from app.vector_db import get_qa_chain
+from app.utils.websocket_manager import websocket_manager, WebSocketMessage
+from app.utils.websocket_models import (
+    ChatMessageRequest, 
+    ChatMessageResponse, 
+    WebSocketMessageData, 
+    MessageType,
+    AIResponseData,
+    SystemMessageData,
+    UserStatus,
+    ChatSessionInfo,
+    ChatStatsResponse
+)
+import json
 import logging
+import uuid
+import asyncio
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -171,3 +188,509 @@ async def test_org_vector_store(org_id: str):
             "status": "error",
             "message": f"Vector store error: {str(e)}"
         }
+
+
+# WebSocket endpoint for real-time chat
+@router.websocket("/ws/{org_id}/{user_id}")
+async def websocket_chat_endpoint(
+    websocket: WebSocket, 
+    org_id: str, 
+    user_id: str,
+    session_id: Optional[str] = Query(None),
+    user_name: Optional[str] = Query(None)
+):
+    """
+    WebSocket endpoint for real-time chat functionality.
+    
+    Args:
+        websocket: WebSocket connection
+        org_id: Organization ID
+        user_id: User ID
+        session_id: Optional session ID (will generate if not provided)
+        user_name: Optional user display name
+    """
+    if not session_id:
+        session_id = str(uuid.uuid4())
+    
+    logger.info(f"WebSocket connection attempt for org {org_id}, user {user_id}, session {session_id}")
+    
+    try:
+        # Connect to WebSocket manager
+        session = await websocket_manager.connect(websocket, session_id, org_id, user_id)
+        
+        # Send welcome message
+        welcome_message = WebSocketMessage(
+            type="system_message",
+            data={
+                "message": f"Welcome to QueryGuard chat! Session {session_id} established.",
+                "session_id": session_id,
+                "user_name": user_name,
+                "status": "connected"
+            },
+            sender_id="system",
+            room_id=org_id
+        )
+        await websocket_manager.send_message(session_id, welcome_message)
+        
+        # Notify other users in the organization
+        user_join_message = WebSocketMessage(
+            type="user_status",
+            data={
+                "message": f"User {user_name or user_id} joined the chat",
+                "user_id": user_id,
+                "user_name": user_name,
+                "status": "online",
+                "action": "joined"
+            },
+            sender_id=user_id,
+            room_id=org_id
+        )
+        await websocket_manager.broadcast_to_org(org_id, user_join_message, exclude_session=session_id)
+        
+        # Main message loop
+        while True:
+            try:
+                # Receive message from client
+                raw_message = await websocket.receive_text()
+                message_data = json.loads(raw_message)
+                
+                logger.info(f"Received message from {session_id}: {message_data.get('type', 'unknown')}")
+                
+                # Process different message types
+                message_type = message_data.get("type", MessageType.CHAT_MESSAGE)
+                
+                if message_type == MessageType.CHAT_MESSAGE:
+                    await handle_chat_message(session_id, org_id, user_id, user_name, message_data)
+                elif message_type == MessageType.TYPING_INDICATOR:
+                    await handle_typing_indicator(session_id, org_id, user_id, user_name, message_data)
+                elif message_type == "ping":
+                    await handle_ping(session_id)
+                else:
+                    logger.warning(f"Unknown message type: {message_type}")
+                    
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket disconnected for session {session_id}")
+                break
+            except json.JSONDecodeError:
+                logger.error(f"Invalid JSON received from session {session_id}")
+                error_message = WebSocketMessage(
+                    type="error",
+                    data={
+                        "error_code": "INVALID_JSON",
+                        "error_message": "Invalid message format. Please send valid JSON."
+                    },
+                    sender_id="system"
+                )
+                await websocket_manager.send_message(session_id, error_message)
+            except Exception as e:
+                logger.error(f"Error processing message from session {session_id}: {str(e)}")
+                error_message = WebSocketMessage(
+                    type="error",
+                    data={
+                        "error_code": "PROCESSING_ERROR",
+                        "error_message": f"Error processing message: {str(e)}"
+                    },
+                    sender_id="system"
+                )
+                await websocket_manager.send_message(session_id, error_message)
+                
+    except Exception as e:
+        logger.error(f"WebSocket connection error for session {session_id}: {str(e)}")
+    finally:
+        # Clean up connection
+        await websocket_manager.disconnect(session_id)
+        
+        # Notify other users that this user left
+        user_leave_message = WebSocketMessage(
+            type="user_status",
+            data={
+                "message": f"User {user_name or user_id} left the chat",
+                "user_id": user_id,
+                "user_name": user_name,
+                "status": "offline",
+                "action": "left"
+            },
+            sender_id=user_id,
+            room_id=org_id
+        )
+        await websocket_manager.broadcast_to_org(org_id, user_leave_message)
+        
+        logger.info(f"WebSocket cleanup completed for session {session_id}")
+
+async def handle_chat_message(session_id: str, org_id: str, user_id: str, user_name: Optional[str], message_data: dict):
+    """Handle incoming chat messages and generate AI responses"""
+    try:
+        content = message_data.get("content", "").strip()
+        if not content:
+            return
+            
+        conversation_id = message_data.get("conversation_id")
+        
+        # Echo the user message to all users in the organization
+        user_message = WebSocketMessage(
+            type="chat_message",
+            data={
+                "content": content,
+                "sender_id": user_id,
+                "sender_name": user_name,
+                "message_type": "user",
+                "conversation_id": conversation_id
+            },
+            sender_id=user_id,
+            room_id=org_id
+        )
+        await websocket_manager.broadcast_to_org(org_id, user_message)
+        
+        # Send typing indicator for AI
+        ai_typing = WebSocketMessage(
+            type="typing",
+            data={
+                "is_typing": True,
+                "sender_id": "ai_assistant",
+                "sender_name": "QueryGuard AI"
+            },
+            sender_id="ai_assistant",
+            room_id=org_id
+        )
+        await websocket_manager.broadcast_to_org(org_id, ai_typing)
+        
+        # Process with AI
+        start_time = datetime.utcnow()
+        try:
+            qa_chain = get_qa_chain(org_id, k=5)
+            result = qa_chain.invoke({"query": content})
+            
+            response_text = result.get("result", "I'm sorry, I couldn't generate a response.")
+            source_documents = result.get("source_documents", [])
+            
+            # Format source documents
+            sources = []
+            for doc in source_documents:
+                source_info = {
+                    "content": doc.page_content,
+                    "metadata": doc.metadata
+                }
+                sources.append(source_info)
+            
+            processing_time = (datetime.utcnow() - start_time).total_seconds()
+            
+            # Send AI response
+            ai_response = WebSocketMessage(
+                type="ai_response",
+                data={
+                    "response": response_text,
+                    "sources": sources,
+                    "processing_time": processing_time,
+                    "conversation_id": conversation_id,
+                    "sender_id": "ai_assistant",
+                    "sender_name": "QueryGuard AI",
+                    "message_type": "assistant"
+                },
+                sender_id="ai_assistant",
+                room_id=org_id
+            )
+            await websocket_manager.broadcast_to_org(org_id, ai_response)
+            
+        except Exception as e:
+            logger.error(f"Error generating AI response: {str(e)}")
+            error_response = WebSocketMessage(
+                type="ai_response",
+                data={
+                    "response": "I apologize, but I encountered an error while processing your request. Please try again.",
+                    "sources": [],
+                    "error": str(e),
+                    "conversation_id": conversation_id,
+                    "sender_id": "ai_assistant",
+                    "sender_name": "QueryGuard AI",
+                    "message_type": "assistant"
+                },
+                sender_id="ai_assistant",
+                room_id=org_id
+            )
+            await websocket_manager.broadcast_to_org(org_id, error_response)
+        finally:
+            # Stop typing indicator
+            ai_stop_typing = WebSocketMessage(
+                type="typing",
+                data={
+                    "is_typing": False,
+                    "sender_id": "ai_assistant",
+                    "sender_name": "QueryGuard AI"
+                },
+                sender_id="ai_assistant",
+                room_id=org_id
+            )
+            await websocket_manager.broadcast_to_org(org_id, ai_stop_typing)
+            
+    except Exception as e:
+        logger.error(f"Error handling chat message: {str(e)}")
+
+async def handle_typing_indicator(session_id: str, org_id: str, user_id: str, user_name: Optional[str], message_data: dict):
+    """Handle typing indicator messages"""
+    try:
+        is_typing = message_data.get("data", {}).get("is_typing", False)
+        
+        typing_message = WebSocketMessage(
+            type="typing",
+            data={
+                "is_typing": is_typing,
+                "sender_id": user_id,
+                "sender_name": user_name
+            },
+            sender_id=user_id,
+            room_id=org_id
+        )
+        
+        # Broadcast to everyone except the sender
+        await websocket_manager.broadcast_to_org(org_id, typing_message, exclude_session=session_id)
+        
+    except Exception as e:
+        logger.error(f"Error handling typing indicator: {str(e)}")
+
+async def handle_ping(session_id: str):
+    """Handle ping messages to keep connection alive"""
+    try:
+        pong_message = WebSocketMessage(
+            type="pong",
+            data={"message": "pong"},
+            sender_id="system"
+        )
+        await websocket_manager.send_message(session_id, pong_message)
+        
+    except Exception as e:
+        logger.error(f"Error handling ping: {str(e)}")
+
+# REST API endpoints for chat management
+@router.get("/sessions/{org_id}", response_model=List[ChatSessionInfo])
+async def get_active_chat_sessions(org_id: str):
+    """
+    Get all active chat sessions for an organization.
+    
+    Args:
+        org_id: Organization ID
+        
+    Returns:
+        List of active chat sessions
+    """
+    try:
+        sessions = await websocket_manager.get_active_sessions(org_id=org_id)
+        
+        session_infos = []
+        for session in sessions:
+            session_info = ChatSessionInfo(
+                session_id=session.session_id,
+                org_id=session.org_id,
+                user_id=session.user_id,
+                status=UserStatus.ONLINE,
+                created_at=session.created_at,
+                last_activity=session.last_activity,
+                connection_count=1
+            )
+            session_infos.append(session_info)
+        
+        return session_infos
+        
+    except Exception as e:
+        logger.error(f"Error getting active sessions for org {org_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting active sessions: {str(e)}")
+
+@router.get("/stats", response_model=ChatStatsResponse)
+async def get_chat_statistics():
+    """
+    Get WebSocket connection statistics.
+    
+    Returns:
+        Chat statistics
+    """
+    try:
+        stats = websocket_manager.get_stats()
+        return ChatStatsResponse(**stats)
+        
+    except Exception as e:
+        logger.error(f"Error getting chat statistics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting statistics: {str(e)}")
+
+@router.post("/cleanup")
+async def cleanup_inactive_sessions(timeout_minutes: int = 30):
+    """
+    Manually trigger cleanup of inactive sessions.
+    
+    Args:
+        timeout_minutes: Minutes of inactivity before cleanup
+        
+    Returns:
+        Cleanup result
+    """
+    try:
+        await websocket_manager.cleanup_inactive_sessions(timeout_minutes)
+        return {"message": f"Cleaned up inactive sessions (timeout: {timeout_minutes} minutes)"}
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up sessions: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error cleaning up sessions: {str(e)}")
+
+@router.get("/test-page")
+async def get_websocket_test_page():
+    """
+    Serve a simple test page for WebSocket functionality.
+    """
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>QueryGuard Chat WebSocket Test</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            .container { max-width: 800px; margin: 0 auto; }
+            .messages { height: 400px; border: 1px solid #ccc; overflow-y: scroll; padding: 10px; margin: 10px 0; }
+            .message { margin: 5px 0; padding: 5px; border-radius: 5px; }
+            .user-message { background-color: #e3f2fd; }
+            .ai-message { background-color: #f3e5f5; }
+            .system-message { background-color: #fff3e0; font-style: italic; }
+            .input-group { display: flex; gap: 10px; margin: 10px 0; }
+            input, button { padding: 8px; }
+            input[type="text"] { flex: 1; }
+            .status { margin: 10px 0; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>QueryGuard Chat WebSocket Test</h1>
+            
+            <div class="input-group">
+                <input type="text" id="orgId" placeholder="Organization ID" value="76d33fb3-6062-456b-a211-4aec9971f8be">
+                <input type="text" id="userId" placeholder="User ID" value="test-user">
+                <input type="text" id="userName" placeholder="User Name" value="Test User">
+                <button onclick="connect()">Connect</button>
+                <button onclick="disconnect()">Disconnect</button>
+            </div>
+            
+            <div class="status" id="status">Disconnected</div>
+            
+            <div class="messages" id="messages"></div>
+            
+            <div class="input-group">
+                <input type="text" id="messageInput" placeholder="Type your message..." onkeypress="handleKeyPress(event)">
+                <button onclick="sendMessage()">Send</button>
+                <button onclick="sendTyping(true)">Start Typing</button>
+                <button onclick="sendTyping(false)">Stop Typing</button>
+            </div>
+        </div>
+
+        <script>
+            let ws = null;
+            let sessionId = null;
+
+            function connect() {
+                const orgId = document.getElementById('orgId').value;
+                const userId = document.getElementById('userId').value;
+                const userName = document.getElementById('userName').value;
+                
+                if (!orgId || !userId) {
+                    alert('Please enter Organization ID and User ID');
+                    return;
+                }
+                
+                sessionId = 'test-session-' + Math.random().toString(36).substr(2, 9);
+                const wsUrl = `ws://localhost:8000/chat/ws/${orgId}/${userId}?session_id=${sessionId}&user_name=${encodeURIComponent(userName)}`;
+                
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = function(event) {
+                    document.getElementById('status').textContent = 'Connected';
+                    addMessage('System', 'Connected to WebSocket', 'system');
+                };
+                
+                ws.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    handleMessage(data);
+                };
+                
+                ws.onclose = function(event) {
+                    document.getElementById('status').textContent = 'Disconnected';
+                    addMessage('System', 'WebSocket connection closed', 'system');
+                };
+                
+                ws.onerror = function(error) {
+                    addMessage('System', 'WebSocket error: ' + error, 'system');
+                };
+            }
+
+            function disconnect() {
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+            }
+
+            function sendMessage() {
+                const input = document.getElementById('messageInput');
+                const content = input.value.trim();
+                
+                if (!content || !ws) return;
+                
+                const message = {
+                    type: 'chat_message',
+                    content: content
+                };
+                
+                ws.send(JSON.stringify(message));
+                input.value = '';
+            }
+
+            function sendTyping(isTyping) {
+                if (!ws) return;
+                
+                const message = {
+                    type: 'typing',
+                    data: { is_typing: isTyping }
+                };
+                
+                ws.send(JSON.stringify(message));
+            }
+
+            function handleMessage(data) {
+                console.log('Received:', data);
+                
+                switch(data.type) {
+                    case 'chat_message':
+                        const senderName = data.data.sender_name || data.sender_id;
+                        addMessage(senderName, data.data.content, 'user');
+                        break;
+                    case 'ai_response':
+                        addMessage('QueryGuard AI', data.data.response, 'ai');
+                        break;
+                    case 'system_message':
+                        addMessage('System', data.data.message, 'system');
+                        break;
+                    case 'typing':
+                        const typingSender = data.data.sender_name || data.sender_id;
+                        if (data.data.is_typing) {
+                            addMessage(typingSender, 'is typing...', 'system');
+                        }
+                        break;
+                    case 'user_status':
+                        addMessage('System', data.data.message, 'system');
+                        break;
+                }
+            }
+
+            function addMessage(sender, content, type) {
+                const messages = document.getElementById('messages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}-message`;
+                messageDiv.innerHTML = `<strong>${sender}:</strong> ${content}`;
+                messages.appendChild(messageDiv);
+                messages.scrollTop = messages.scrollHeight;
+            }
+
+            function handleKeyPress(event) {
+                if (event.key === 'Enter') {
+                    sendMessage();
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
