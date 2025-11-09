@@ -61,6 +61,20 @@ SQL_PARSE_RESULT_CACHE_SIZE = 1000
 SQL_LINEAGE_TIMEOUT_SECONDS = 10
 SQL_PARSER_TRACE = False
 
+_DATE_PART_KEYWORDS = {
+    "YEAR",
+    "QUARTER",
+    "MONTH",
+    "WEEK",
+    "DAY",
+    "HOUR",
+    "MINUTE",
+    "SECOND",
+    "MICROSECOND",
+    "MILLISECOND",
+    "NANOSECOND",
+}
+
 
 assert len(sqlglot.optimizer.optimizer.RULES) >= 10
 
@@ -996,6 +1010,55 @@ def _sqlglot_lineage_inner(
 
     logger.debug("Parsing lineage from sql statement: %s", sql)
     statement = parse_statement(sql, dialect=dialect)
+
+    def _normalize_misordered_datediff(node: sqlglot.exp.Expression) -> sqlglot.exp.Expression:
+        if isinstance(node, sqlglot.exp.DateDiff):
+            first_arg = node.args.get("this")
+            unit_arg = node.args.get("unit")
+            if (
+                isinstance(first_arg, sqlglot.exp.Column)
+                and not first_arg.table
+                and first_arg.name
+                and first_arg.name.upper() in _DATE_PART_KEYWORDS
+            ):
+                desired_unit = first_arg.name.upper()
+                if (
+                    isinstance(unit_arg, sqlglot.exp.Var)
+                    and getattr(unit_arg, "this", None)
+                    and unit_arg.this.upper() not in _DATE_PART_KEYWORDS
+                ):
+                    desired_end: sqlglot.exp.Expression
+                    expr_arg = node.args.get("expression")
+                    if isinstance(expr_arg, sqlglot.exp.Column) and expr_arg.table:
+                        table_ref = (
+                            expr_arg.table.copy()
+                            if isinstance(expr_arg.table, sqlglot.exp.Expression)
+                            else sqlglot.exp.Identifier(
+                                this=str(expr_arg.table), quoted=False
+                            )
+                        )
+                        desired_end = sqlglot.exp.Column(
+                            this=sqlglot.exp.Identifier(
+                                this=unit_arg.this.lower(), quoted=False
+                            ),
+                            table=table_ref,
+                        )
+                    else:
+                        desired_end = sqlglot.exp.column(unit_arg.this.lower())
+                    node.set("this", desired_end)
+                    node.set(
+                        "unit",
+                        sqlglot.exp.Var(this=desired_unit, is_string=True),
+                    )
+                elif not isinstance(unit_arg, sqlglot.exp.Var):
+                    node.set(
+                        "unit",
+                        sqlglot.exp.Var(this=desired_unit, is_string=True),
+                    )
+                    node.set("this", unit_arg.copy())
+        return node
+
+    statement = statement.transform(_normalize_misordered_datediff, copy=True)
 
     if isinstance(statement, sqlglot.exp.Command):
         raise UnsupportedStatementTypeError(
