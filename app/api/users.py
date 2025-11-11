@@ -33,7 +33,6 @@ class CreateUserRequest(BaseModel):
     username: str
     password: str
     email: EmailStr
-    org_id: str
     role: str = MEMBER  # Default to MEMBER if not specified
 
 class UpdateUserRequest(BaseModel):
@@ -73,6 +72,7 @@ def can_modify_user(modifier: User, target_user: User) -> bool:
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def create_user(
     user: CreateUserRequest,
+    org_id: str,
     current_user: User = Depends(require_minimum_role(ORGANIZATION_ADMIN)),
     db: Session = Depends(get_db),
     request: Request = None
@@ -80,24 +80,25 @@ def create_user(
     """
     Create a new user with role assignment.
     Requires: PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, or ORGANIZATION_ADMIN
+    org_id should be provided as a query parameter in the link.
     """
-    logger.info("POST /users - attempt by user_id=%s for username=%s role=%s", 
-                current_user.id, user.username, user.role)
+    logger.info("POST /users - attempt by user_id=%s for username=%s role=%s org_id=%s", 
+                current_user.id, user.username, user.role, org_id)
     
     # Validate role
     if user.role not in VALID_ROLES:
         logger.warning("/users - create: invalid role %s", user.role)
         raise HTTPException(status_code=400, detail=f"Invalid role. Valid roles: {', '.join(VALID_ROLES)}")
     
-    # Check if current user can assign the requested role
-    check_role_assignment(current_user, user.role, user.org_id)
-    
     # Validate org_id format
     try:
-        org_uuid = uuid.UUID(user.org_id)
+        org_uuid = uuid.UUID(org_id)
     except ValueError:
-        logger.warning("/users - create: invalid org_id format %s", user.org_id)
+        logger.warning("/users - create: invalid org_id format %s", org_id)
         raise HTTPException(status_code=400, detail="Invalid organization ID format")
+    
+    # Check if current user can assign the requested role
+    check_role_assignment(current_user, user.role, org_id)
     
     # Check organization access (unless PRODUCT_SUPPORT_ADMIN)
     check_organization_access(current_user, str(org_uuid))
