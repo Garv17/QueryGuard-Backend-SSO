@@ -4,7 +4,8 @@ from typing import List, Optional, Dict, Any
 from app.vector_db import get_qa_chain
 from app.api.auth import get_current_user
 from app.utils.models import User
-from app.tools import build_org_lineage_tool, build_org_query_history_tool, build_org_pr_repo_tool, build_org_code_suggestion_tool, build_org_jira_tool, LLM
+from app.tools import build_org_lineage_tool, build_org_query_history_tool, build_org_pr_repo_tool, build_org_code_suggestion_tool, build_org_jira_tool
+from app.vector_db import CHAT_LLM
 from app.services.impact_analysis import fetch_queries
 import logging
 from langchain.agents import initialize_agent, AgentType
@@ -73,7 +74,9 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
             "Respond with exactly one word: lineage, impact, pr, code, jira, or other.\n\n"
             f"Message: {request.message}"
         )
-        classification = LLM.invoke(classify_prompt)
+        if not CHAT_LLM:
+            raise HTTPException(status_code=500, detail="OpenAI API key not configured for chatbot")
+        classification = CHAT_LLM.invoke(classify_prompt)
         classification_label = (getattr(classification, "content", str(classification)) or "other").strip().lower()
 
         if classification_label not in {"lineage", "impact", "pr", "code", "jira"}:
@@ -86,7 +89,7 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
                 f"USER: {request.message}\n"
                 "ASSISTANT:"
             )
-            llm_reply = LLM.invoke(persona_prompt)
+            llm_reply = CHAT_LLM.invoke(persona_prompt)
             reply_text = getattr(llm_reply, "content", str(llm_reply))
             return ChatResponse(
                 response=reply_text,
@@ -108,7 +111,7 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
 
         agent = initialize_agent(
             tools=[lineage_tool, query_history_tool, pr_repo_tool, code_suggestion_tool, jira_tool],
-            llm=LLM,
+            llm=CHAT_LLM,
             agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             verbose=True,
         )
