@@ -34,7 +34,6 @@ class UserSignup(BaseModel):
     username: str
     password: str
     email: EmailStr
-    org_id: str
 
 class UserLogin(BaseModel):
     username: str
@@ -76,17 +75,18 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
 
 # --- Endpoints ---
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
-def signup(user: UserSignup, db: Session = Depends(get_db), request: Request = None):
+def signup(user: UserSignup, org_id: str, db: Session = Depends(get_db), request: Request = None):
     """
     Public signup endpoint - creates users with MEMBER role only.
     For creating users with other roles, use /users endpoint (requires authentication and appropriate role).
+    org_id should be provided as a query parameter in the signup link.
     """
-    logger.info("POST /auth/signup - attempt for username=%s org_id=%s ip=%s", user.username, user.org_id, request.client.host if request and request.client else "unknown")
+    logger.info("POST /auth/signup - attempt for username=%s org_id=%s ip=%s", user.username, org_id, request.client.host if request and request.client else "unknown")
     # Validate org_id format
     try:
-        org_uuid = uuid.UUID(user.org_id)
+        org_uuid = uuid.UUID(org_id)
     except ValueError:
-        logger.warning("/auth/signup - invalid org_id format: %s", user.org_id)
+        logger.warning("/auth/signup - invalid org_id format: %s", org_id)
         raise HTTPException(status_code=400, detail="Invalid organization ID format")
     
     # Check if organization exists and is active
