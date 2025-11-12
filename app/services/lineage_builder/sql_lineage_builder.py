@@ -52,6 +52,35 @@ def _extract_merge_mapping(merge: sqlglot.exp.Merge) -> Tuple[str, Optional[str]
             src_col = right.this.name
             colmap[tgt_col] = src_col
 
+    whens = merge.args.get("whens")
+    if whens:
+        for when in getattr(whens, "expressions", []) or []:
+            if when.args.get("matched", True):
+                # WHEN MATCHED handled via SET assignments above
+                continue
+            insert_expr = when.args.get("then")
+            if not isinstance(insert_expr, sqlglot.exp.Insert):
+                continue
+            target_columns = getattr(insert_expr.this, "expressions", []) or []
+            value_expressions = getattr(insert_expr.expression, "expressions", []) or []
+            for target_expr, value_expr in zip(target_columns, value_expressions):
+                tgt_col: Optional[str] = None
+                if isinstance(target_expr, sqlglot.exp.Identifier):
+                    tgt_col = target_expr.name
+                elif isinstance(target_expr, sqlglot.exp.Column) and isinstance(target_expr.this, sqlglot.exp.Identifier):
+                    tgt_col = target_expr.this.name
+                if not tgt_col or tgt_col in colmap:
+                    continue
+
+                src_col: Optional[str] = None
+                if isinstance(value_expr, sqlglot.exp.Identifier):
+                    src_col = value_expr.name
+                elif isinstance(value_expr, sqlglot.exp.Column) and isinstance(value_expr.this, sqlglot.exp.Identifier):
+                    src_col = value_expr.this.name
+
+                if src_col:
+                    colmap[tgt_col] = src_col
+
     return target_urn, source_urn, colmap
 
 
