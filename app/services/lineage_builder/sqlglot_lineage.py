@@ -598,6 +598,27 @@ def _resolve_alias_to_table(
                             )
                             if resolved:
                                 return resolved
+                        elif col_identifier:
+                            sources_dict = getattr(scope, "sources", {}) or {}
+                            for source_alias, table_expr in sources_dict.items():
+                                try:
+                                    source_columns = scope.source_columns(source_alias)
+                                except TypeError:
+                                    source_columns = []
+                                for source_col in source_columns or []:
+                                    source_name = getattr(source_col.this, "name", None) or getattr(source_col, "name", None)
+                                    if source_name and source_name.upper() == col_identifier.upper():
+                                        alias_resolution_attempted = True
+                                        resolved = _resolve_alias_to_table(
+                                            str(source_alias),
+                                            col_identifier,
+                                            alias_map,
+                                            cte_map,
+                                            seen,
+                                        )
+                                        if resolved:
+                                            return resolved
+                                        break
         if target_select_expr is not None:
             value_expr = target_select_expr.this if isinstance(target_select_expr, sqlglot.exp.Alias) else target_select_expr
             if _is_sequence_like_expression(value_expr):
@@ -629,7 +650,7 @@ def _resolve_alias_to_table(
                     alias_resolution_attempted = True
                     resolved = _resolve_alias_to_table(
                         str(table_alias),
-                        column_name,
+                        col_identifier or column_name,
                         alias_map,
                         cte_map,
                         seen,
@@ -718,13 +739,16 @@ def _select_statement_cll(
                 alias_table_mapping=alias_table_mapping,
                 cte_scope_mapping=cte_scope_mapping,
             )
-            if not direct_raw_col_upstreams:
-                fallback = _derive_upstreams_via_alias_walk(
-                    lineage_node,
-                    alias_table_mapping,
-                    cte_scope_mapping,
-                )
-                direct_raw_col_upstreams = fallback
+            fallback_upstreams = _derive_upstreams_via_alias_walk(
+                lineage_node,
+                alias_table_mapping,
+                cte_scope_mapping,
+            )
+            if fallback_upstreams:
+                if direct_raw_col_upstreams:
+                    direct_raw_col_upstreams.update(fallback_upstreams)
+                else:
+                    direct_raw_col_upstreams = fallback_upstreams
 
             original_col_expression = lineage_node.expression
             if output_col.startswith("_col_"):
