@@ -314,7 +314,6 @@ def sanitize_identifier(identifier: str) -> str:
         s = "col_" + s
     return s.lower()
 
-
 def preprocess_sql(sql: str) -> str:
     """
     Dynamically clean Snowflake SQL for sqlglot parsing.
@@ -324,7 +323,6 @@ def preprocess_sql(sql: str) -> str:
     return sql
 
 
-# Resolve Recursive CTE Select Star & Subquery Problem 
 def resolve_cte_column_source_issue_recursively(cte_name: str, column_name: str, sql: str) -> list[dict] | None:
     try:
         # Preprocess before parsing
@@ -365,11 +363,113 @@ def resolve_cte_column_source_issue_recursively(cte_name: str, column_name: str,
                     )
             return tables
 
+        # Helper function to extract column lineage from a column expression
+        def extract_column_lineage(column_expr, cte_expr, cte_map, current_cte, visited):
+            # unwrap nested casts/functions until we reach a column
+            while (
+                hasattr(column_expr, "this")
+                and not isinstance(column_expr, exp.Column)
+            ):
+                column_expr = column_expr.this
+
+            if isinstance(column_expr, exp.Column):
+                table_prefix = column_expr.table
+                if table_prefix:
+                    for table in cte_expr.find_all(exp.Table):
+                        if (
+                            table.alias_or_name == table_prefix
+                            or table.name == table_prefix
+                        ):
+                            if table.name in cte_map and table.name not in visited:
+                                return find_column_sources(
+                                    cte_map[table.name],
+                                    cte_map,
+                                    column_expr.name,
+                                    table.name,
+                                    visited | {current_cte},
+                                )
+                            else:
+                                return [
+                                    {
+                                        "source_database": table.catalog or "",
+                                        "source_schema": table.db or "",
+                                        "source_table": table.name,
+                                        "source_column": column_expr.name,
+                                    }
+                                ]
+                else:
+                    tables = extract_source_tables_recursive(
+                        cte_expr, cte_map, visited={current_cte}
+                    )
+                    return [
+                        {
+                            "source_database": t["catalog"],
+                            "source_schema": t["db"],
+                            "source_table": t["table"],
+                            "source_column": column_expr.name,
+                        }
+                        for t in tables
+                    ]
+            return []
+
+        # Helper function to search for columns in filter clauses
+        def search_columns_in_filter_clauses(select_expr, cte_expr, cte_map, target_col, current_cte, visited):
+            results = []
+
+            # Search in WHERE clause
+            if select_expr.args.get("where"):
+                where_expr = select_expr.args["where"]
+                for col in where_expr.find_all(exp.Column):
+                    if col.name.lower() == target_col.lower():
+                        lineage = extract_column_lineage(col, cte_expr, cte_map, current_cte, visited)
+                        if lineage:
+                            results.extend(lineage)
+
+            # Search in HAVING clause
+            if select_expr.args.get("having"):
+                having_expr = select_expr.args["having"]
+                for col in having_expr.find_all(exp.Column):
+                    if col.name.lower() == target_col.lower():
+                        lineage = extract_column_lineage(col, cte_expr, cte_map, current_cte, visited)
+                        if lineage:
+                            results.extend(lineage)
+
+            # Search in GROUP BY clause
+            if select_expr.args.get("group"):
+                group_expr = select_expr.args["group"]
+                for col in group_expr.find_all(exp.Column):
+                    if col.name.lower() == target_col.lower():
+                        lineage = extract_column_lineage(col, cte_expr, cte_map, current_cte, visited)
+                        if lineage:
+                            results.extend(lineage)
+
+            # Search in ORDER BY clause
+            if select_expr.args.get("order"):
+                order_expr = select_expr.args["order"]
+                for col in order_expr.find_all(exp.Column):
+                    if col.name.lower() == target_col.lower():
+                        lineage = extract_column_lineage(col, cte_expr, cte_map, current_cte, visited)
+                        if lineage:
+                            results.extend(lineage)
+
+            # Search in JOIN conditions
+            for join in select_expr.find_all(exp.Join):
+                if join.args.get("on"):
+                    on_expr = join.args["on"]
+                    for col in on_expr.find_all(exp.Column):
+                        if col.name.lower() == target_col.lower():
+                            lineage = extract_column_lineage(col, cte_expr, cte_map, current_cte, visited)
+                            if lineage:
+                                results.extend(lineage)
+
+            return results
+
         # Find column lineage
         def find_column_sources(cte_expr, cte_map, target_col, current_cte, visited=None):
             visited = visited or set()
 
             for select in cte_expr.find_all(exp.Select):
+                # First, search in SELECT expressions (existing functionality)
                 for expression in select.expressions:
                     alias = expression.alias_or_name
 
@@ -381,53 +481,16 @@ def resolve_cte_column_source_issue_recursively(cte_name: str, column_name: str,
                         column_expr = (
                             expression.this if isinstance(expression, exp.Alias) else expression
                         )
+                        lineage = extract_column_lineage(column_expr, cte_expr, cte_map, current_cte, visited)
+                        if lineage:
+                            return lineage
 
-                        # unwrap nested casts/functions until we reach a column
-                        while (
-                            hasattr(column_expr, "this")
-                            and not isinstance(column_expr, exp.Column)
-                        ):
-                            column_expr = column_expr.this
+                # Then, search in filter clauses (new functionality)
+                filter_results = search_columns_in_filter_clauses(select, cte_expr, cte_map, target_col, current_cte, visited)
+                if filter_results:
+                    return filter_results
 
-                        if isinstance(column_expr, exp.Column):
-                            table_prefix = column_expr.table
-                            if table_prefix:
-                                for table in cte_expr.find_all(exp.Table):
-                                    if (
-                                        table.alias_or_name == table_prefix
-                                        or table.name == table_prefix
-                                    ):
-                                        if table.name in cte_map and table.name not in visited:
-                                            return find_column_sources(
-                                                cte_map[table.name],
-                                                cte_map,
-                                                column_expr.name,
-                                                table.name,
-                                                visited | {current_cte},
-                                            )
-                                        else:
-                                            return [
-                                                {
-                                                    "source_database": table.catalog or "",
-                                                    "source_schema": table.db or "",
-                                                    "source_table": table.name,
-                                                }
-                                            ]
-                            else:
-                                tables = extract_source_tables_recursive(
-                                    cte_expr, cte_map, visited={current_cte}
-                                )
-                                return [
-                                    {
-                                        "source_database": t["catalog"],
-                                        "source_schema": t["db"],
-                                        "source_table": t["table"],
-
-                                    }
-                                    for t in tables
-                                ]
-
-            # Recurse into other CTEs or subqueries if column not found directly
+            # 🔄 Recurse into other CTEs or subqueries if column not found directly
             for sub_cte in [
                 t.name
                 for t in cte_expr.find_all(exp.Table)
@@ -448,6 +511,15 @@ def resolve_cte_column_source_issue_recursively(cte_name: str, column_name: str,
         # Merge CTEs + subqueries into one map
         all_query_map = {**cte_map, **subquery_map}
 
+        # If cte_name is None, search across all CTEs/subqueries
+        if cte_name is None:
+            for current_cte_name, cte_expr in all_query_map.items():
+                result = find_column_sources(cte_expr, all_query_map, column_name, current_cte_name)
+                if result:
+                    return result
+            return None
+
+        # If specific CTE name is provided
         if cte_name not in all_query_map:
             return None
 
@@ -456,9 +528,9 @@ def resolve_cte_column_source_issue_recursively(cte_name: str, column_name: str,
         return result if result else None
 
     except Exception as e:
-        logger.error("Error resolving recursive cte problem: %s", e, exc_info=True)
+        print(f"Error: {e}")
         return None
-
+        
 # Find Relevant table name for given column
 def find_column_table_name(qualified_names, column_name, base_objects_accessed):
     try:

@@ -27,7 +27,6 @@ class User(Base):
     email = Column(String(100), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
-    role = Column(String(50), nullable=False, default="MEMBER", index=True)  # PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, ORGANIZATION_ADMIN, MEMBER
     password_reset_otp = Column(String(6), nullable=True)
     reset_otp_expires = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -350,11 +349,11 @@ class InformationSchemacolumns(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
     connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
-    table_catalog = Column(String(200), nullable=True)
-    table_schema = Column(String(200), nullable=True)
-    table_name = Column(String(200), nullable=True)
-    column_name = Column(String(200), nullable=True)
-    data_type = Column(String(100), nullable=True)
+    table_catalog = Column(String, nullable=True)
+    table_schema = Column(String, nullable=True)
+    table_name = Column(String, nullable=True)
+    column_name = Column(String, nullable=True)
+    data_type = Column(String, nullable=True)
     ordinal_position = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -449,8 +448,3 @@ class GitHubPullRequestAnalysis(Base):
     analysis_data = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    # Optional relationships
-    # organization = relationship("Organization", backref="pr_analyses")
-    # installation = relationship("GitHubInstallation", backref="pr_analyses")
-    # repository = relationship("GitHubRepository", backref="pr_analyses")
