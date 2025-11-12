@@ -520,14 +520,35 @@ def _resolve_alias_to_table(
         return None
 
     alias_key = alias.upper()
-    if alias_map and alias_key in alias_map:
-        return alias_map[alias_key], column_name
 
     if seen is None:
         seen = set()
     if alias_key in seen:
         return None
     seen.add(alias_key)
+
+    def _resolve_table_ref(table_ref: _TableName, column: str) -> Optional[Tuple[_TableName, str]]:
+        if (
+            not table_ref.database
+            and table_ref.table
+            and cte_map
+            and table_ref.table.upper() in cte_map
+        ):
+            return _resolve_alias_to_table(
+                table_ref.table,
+                column,
+                alias_map,
+                cte_map,
+                seen,
+            )
+        return (table_ref, column)
+
+    if alias_map and alias_key in alias_map:
+        table_ref = alias_map[alias_key]
+        resolved = _resolve_table_ref(table_ref, column_name)
+        if resolved:
+            return resolved
+        return table_ref, column_name
 
     if cte_map and alias_key in cte_map:
         scope = cte_map[alias_key]
@@ -586,11 +607,17 @@ def _resolve_alias_to_table(
                 src_name = src_identifier or getattr(col, "name", None)
                 if src_name and src_name.upper() == column_name.upper():
                     if isinstance(table_expr, sqlglot.exp.Table):
-                        return _TableName.from_sqlglot_table(table_expr), src_name
+                        table_ref = _TableName.from_sqlglot_table(table_expr)
+                        resolved = _resolve_table_ref(table_ref, src_name)
+                        if resolved:
+                            return resolved
         # Fallback to first physical table source when no column match was found
         for _, table_expr in sources.items():
             if isinstance(table_expr, sqlglot.exp.Table):
-                return _TableName.from_sqlglot_table(table_expr), column_name
+                table_ref = _TableName.from_sqlglot_table(table_expr)
+                resolved = _resolve_table_ref(table_ref, column_name)
+                if resolved:
+                    return resolved
 
     return None
 
@@ -796,6 +823,73 @@ def _get_direct_raw_col_upstreams(
             normalized_col = sqlglot.parse_one(node.name).this.name
             if hasattr(node, "subfield") and node.subfield:
                 normalized_col = f"{normalized_col}.{node.subfield}"
+
+            pivots = node.expression.args.get("pivots") or []
+            handled_unpivot = False
+            if pivots:
+                table_alias = table_ref.table or node.expression.alias_or_name
+                for pivot in pivots:
+                    if not getattr(pivot, "args", None):
+                        continue
+                    if not pivot.args.get("unpivot"):
+                        continue
+                    output_columns = [
+                        expr.name
+                        for expr in (pivot.args.get("expressions") or [])
+                        if isinstance(expr, sqlglot.exp.Column) and expr.name
+                    ]
+                    if not any(
+                        output.upper() == normalized_col.upper()
+                        for output in output_columns
+                    ):
+                        continue
+                    handled_unpivot = True
+                    fields = pivot.args.get("fields") or []
+                    for field in fields:
+                        input_expressions = getattr(field, "expressions", []) or []
+                        for input_expr in input_expressions:
+                            if (
+                                isinstance(input_expr, sqlglot.exp.Column)
+                                and input_expr.name
+                                and table_alias
+                            ):
+                                resolved = _resolve_alias_to_table(
+                                    table_alias,
+                                    input_expr.name,
+                                    alias_table_mapping,
+                                    cte_scope_mapping,
+                                )
+                                if resolved:
+                                    resolved_table, resolved_column = resolved
+                                    direct_raw_col_upstreams.add(
+                                        _ColumnRef(
+                                            table=resolved_table,
+                                            column=resolved_column,
+                                        )
+                                    )
+            if handled_unpivot:
+                continue
+
+            table_alias = table_ref.table
+            if table_alias and (
+                (cte_scope_mapping and table_alias.upper() in cte_scope_mapping)
+                or (alias_table_mapping and table_alias.upper() in alias_table_mapping)
+            ):
+                resolved = _resolve_alias_to_table(
+                    table_alias,
+                    normalized_col,
+                    alias_table_mapping,
+                    cte_scope_mapping,
+                )
+                if resolved:
+                    resolved_table, resolved_column = resolved
+                    direct_raw_col_upstreams.add(
+                        _ColumnRef(
+                            table=resolved_table,
+                            column=resolved_column,
+                        )
+                    )
+                    continue
 
             direct_raw_col_upstreams.add(
                 _ColumnRef(table=table_ref, column=normalized_col)
