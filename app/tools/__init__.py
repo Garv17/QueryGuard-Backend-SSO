@@ -3,7 +3,7 @@ from .lineage import (
     build_org_lineage_tool,
     get_query_history_search_for_org,
     build_org_query_history_tool,
-    LLM,
+    CHAT_LLM,
 )
 from .pr_repo import (
     fetch_pr_analyses_for_org,
@@ -43,7 +43,7 @@ __all__ = [
     "get_active_jira_connection",
     "create_jira_ticket_for_org",
     "build_org_jira_tool",
-    "LLM",
+    "CHAT_LLM",
 ]
 
 

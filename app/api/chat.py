@@ -57,7 +57,7 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
         resolved_org_id = str(current_user.org_id)
 
         logger.info(f"Chat request for org_id: {resolved_org_id}, message: {request.message[:100]}...")
-
+        
         # Prepare the query with conversation context if provided
         query = request.message
         if request.conversation_history:
@@ -65,7 +65,7 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
             if context_messages:
                 context = "\n".join(context_messages)
                 query = f"Previous conversation context:\n{context}\n\nCurrent question: {request.message}"
-
+        
         # LLM classification: decide whether to use tools (lineage/impact) or respond conversationally (other)
         classify_prompt = (
             "You are a classifier. Decide if the user's message requires using specialized tools for: "
@@ -181,7 +181,7 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
                     pr_repo_data = data
         except Exception:
             pass
-
+        
         return ChatResponse(
             response=response_text,
             sources=[],  # Tool outputs include their own context; no structured source docs here
