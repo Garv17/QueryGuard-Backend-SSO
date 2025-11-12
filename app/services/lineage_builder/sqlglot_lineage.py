@@ -744,11 +744,8 @@ def _select_statement_cll(
                 alias_table_mapping,
                 cte_scope_mapping,
             )
-            if fallback_upstreams:
-                if direct_raw_col_upstreams:
-                    direct_raw_col_upstreams.update(fallback_upstreams)
-                else:
-                    direct_raw_col_upstreams = fallback_upstreams
+            if fallback_upstreams and not direct_raw_col_upstreams:
+                direct_raw_col_upstreams = fallback_upstreams
 
             original_col_expression = lineage_node.expression
             if output_col.startswith("_col_"):
