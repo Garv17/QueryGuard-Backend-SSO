@@ -16,6 +16,7 @@ from app.database import get_db
 from app.utils.models import User, UserToken, Organization
 from app.utils.rbac import MEMBER
 from app.utils.auth_deps import get_current_user, SECRET_KEY, ALGORITHM
+from app.utils.email_service import send_otp_email
 import hashlib
 import uuid
 import os
@@ -177,13 +178,16 @@ def forgot_password(req: ForgotPassword, db: Session = Depends(get_db), request:
     
     db.commit()
     
-    # TODO: Send email with OTP
-    # In production, implement email sending here
-    # For now, return OTP in response (remove this in production)
-    logger.info("/auth/forgot-password - OTP generated for user_id=%s", user.id)
+    # Send email with OTP
+    email_sent = send_otp_email(req.email, otp)
+    if not email_sent:
+        logger.error("/auth/forgot-password - failed to send email to %s for user_id=%s", req.email, user.id)
+        # Still return success to prevent email enumeration attacks
+        # The OTP is still generated and stored, but email delivery failed
+    
+    logger.info("/auth/forgot-password - OTP generated for user_id=%s, email_sent=%s", user.id, email_sent)
     return {
-        "message": "Password reset OTP generated and sent to email",
-        "otp": otp,  # Remove this in production
+        "message": "If the email exists, a password reset OTP has been sent to your email address",
         "note": "OTP expires in 60 minutes"
     }
 

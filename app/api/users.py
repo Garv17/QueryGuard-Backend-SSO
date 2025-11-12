@@ -11,11 +11,13 @@ from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from pydantic import BaseModel, EmailStr
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.database import get_db
 from app.utils.models import User, Organization
 from app.utils.auth_deps import get_current_user
-from app.api.auth import hash_password
+from app.api.auth import hash_password, generate_otp
+from app.utils.email_service import send_welcome_email
+import secrets
 from app.utils.rbac import (
     PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, ORGANIZATION_ADMIN, MEMBER,
     VALID_ROLES, require_minimum_role, check_role_assignment, 
@@ -31,7 +33,7 @@ logger = logging.getLogger("users")
 # --- Models ---
 class CreateUserRequest(BaseModel):
     username: str
-    password: str
+    password: Optional[str] = None  # Optional - if not provided, OTP will be sent for password setup
     email: EmailStr
     role: str = MEMBER  # Default to MEMBER if not specified
 
@@ -124,20 +126,43 @@ def create_user(
         logger.warning("/users - create: email exists %s", user.email)
         raise HTTPException(status_code=400, detail="Email already exists")
 
+    # Always generate OTP for first-time password setup/reset
+    # This allows new users to set their own password regardless of whether admin provided one
+    otp = generate_otp()
+    otp_expires = datetime.utcnow() + timedelta(minutes=60)  # 60 minute expiry
+    
+    # Determine password hash
+    if user.password is None:
+        # Generate a temporary random password (user will set their own via OTP)
+        temp_password = secrets.token_urlsafe(32)
+        password_hash = hash_password(temp_password)
+    else:
+        # Use provided password
+        password_hash = hash_password(user.password)
+    
+    # Always send welcome email with OTP for first-time password setup
+    email_sent = send_welcome_email(user.email, user.username, otp)
+    if not email_sent:
+        logger.error("/users - create: failed to send welcome email to %s", user.email)
+        # Still create the user, but log the error
+    
+    # Create user with OTP stored for first-time password setup
     new_user = User(
         username=user.username,
         email=user.email,
-        password_hash=hash_password(user.password),
+        password_hash=password_hash,
         org_id=org_uuid,
         role=user.role,
-        is_active=True
+        is_active=True,
+        password_reset_otp=otp,
+        reset_otp_expires=otp_expires
     )
     
     try:
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
-        logger.info("/users - created id=%s role=%s by user_id=%s", 
+        logger.info("/users - created id=%s role=%s by user_id=%s, welcome email with OTP sent", 
                    new_user.id, new_user.role, current_user.id)
         return new_user
     except IntegrityError:
