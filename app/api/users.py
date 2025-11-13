@@ -15,8 +15,8 @@ from datetime import datetime, timedelta
 from app.database import get_db
 from app.utils.models import User, Organization
 from app.utils.auth_deps import get_current_user
-from app.api.auth import hash_password, generate_otp
-from app.utils.email_service import send_welcome_email
+from app.api.auth import hash_password, generate_reset_token
+from app.utils.email_service import send_welcome_email, send_password_setup_email
 import secrets
 from app.utils.rbac import (
     PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, ORGANIZATION_ADMIN, MEMBER,
@@ -33,7 +33,7 @@ logger = logging.getLogger("users")
 # --- Models ---
 class CreateUserRequest(BaseModel):
     username: str
-    password: Optional[str] = None  # Optional - if not provided, OTP will be sent for password setup
+    password: Optional[str] = None  # Optional - if not provided, password reset link will be sent for password setup
     email: EmailStr
     role: str = MEMBER  # Default to MEMBER if not specified
 
@@ -126,27 +126,21 @@ def create_user(
         logger.warning("/users - create: email exists %s", user.email)
         raise HTTPException(status_code=400, detail="Email already exists")
 
-    # Always generate OTP for first-time password setup/reset
+    # Generate reset token for first-time password setup/reset
     # This allows new users to set their own password regardless of whether admin provided one
-    otp = generate_otp()
-    otp_expires = datetime.utcnow() + timedelta(minutes=60)  # 60 minute expiry
+    reset_token = generate_reset_token()
+    token_expires = datetime.utcnow() + timedelta(minutes=60)  # 60 minute expiry
     
     # Determine password hash
     if user.password is None:
-        # Generate a temporary random password (user will set their own via OTP)
+        # Generate a temporary random password (user will set their own via reset link)
         temp_password = secrets.token_urlsafe(32)
         password_hash = hash_password(temp_password)
     else:
         # Use provided password
         password_hash = hash_password(user.password)
     
-    # Always send welcome email with OTP for first-time password setup
-    email_sent = send_welcome_email(user.email, user.username, otp)
-    if not email_sent:
-        logger.error("/users - create: failed to send welcome email to %s", user.email)
-        # Still create the user, but log the error
-    
-    # Create user with OTP stored for first-time password setup
+    # Create user first
     new_user = User(
         username=user.username,
         email=user.email,
@@ -154,15 +148,26 @@ def create_user(
         org_id=org_uuid,
         role=user.role,
         is_active=True,
-        password_reset_otp=otp,
-        reset_otp_expires=otp_expires
+        password_reset_token=reset_token,
+        password_reset_token_expires=token_expires
     )
     
     try:
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
-        logger.info("/users - created id=%s role=%s by user_id=%s, welcome email with OTP sent", 
+        
+        # Send welcome email first
+        welcome_email_sent = send_welcome_email(user.email, user.username)
+        if not welcome_email_sent:
+            logger.error("/users - create: failed to send welcome email to %s", user.email)
+        
+        # Then send password setup email with reset link
+        setup_email_sent = send_password_setup_email(user.email, user.username, reset_token)
+        if not setup_email_sent:
+            logger.error("/users - create: failed to send password setup email to %s", user.email)
+        
+        logger.info("/users - created id=%s role=%s by user_id=%s, welcome email and password setup link sent", 
                    new_user.id, new_user.role, current_user.id)
         return new_user
     except IntegrityError:
