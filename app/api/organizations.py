@@ -11,7 +11,9 @@ from sqlalchemy.exc import IntegrityError
 from typing import List
 from pydantic import BaseModel
 from app.database import get_db
-from app.utils.models import Organization
+from app.utils.models import Organization, User
+from app.utils.auth_deps import get_current_user
+from app.utils.rbac import require_organizations_endpoint_access, check_organization_access
 import uuid
 from uuid import UUID
 from datetime import datetime
@@ -42,8 +44,13 @@ class OrganizationResponse(BaseModel):
 
 # --- Endpoints ---
 @router.post("/", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
-def create_organization(org: OrganizationCreate, db: Session = Depends(get_db), request: Request = None):
-    """Create a new organization (Admin only)"""
+def create_organization(
+    org: OrganizationCreate,
+    current_user: User = Depends(require_organizations_endpoint_access()),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """Create a new organization (PRODUCT_SUPPORT_ADMIN only)"""
     # Check if organization name already exists
     existing_org = db.query(Organization).filter(Organization.name == org.name).first()
     if existing_org:
@@ -65,16 +72,25 @@ def create_organization(org: OrganizationCreate, db: Session = Depends(get_db), 
 
 
 @router.get("/", response_model=List[OrganizationResponse])
-def list_organizations(db: Session = Depends(get_db), request: Request = None):
-    """List all organizations (Admin only)"""
+def list_organizations(
+    current_user: User = Depends(require_organizations_endpoint_access()),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """List all organizations (PRODUCT_SUPPORT_ADMIN only)"""
     organizations = db.query(Organization).all()
     logger.debug("/organizations - list count=%d", len(organizations))
     return organizations
 
 
 @router.get("/{org_id}", response_model=OrganizationResponse)
-def get_organization(org_id: str, db: Session = Depends(get_db), request: Request = None):
-    """Get organization details by ID (Admin only)"""
+def get_organization(
+    org_id: str,
+    current_user: User = Depends(require_organizations_endpoint_access()),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """Get organization details by ID (PRODUCT_SUPPORT_ADMIN only)"""
     try:
         org_uuid = uuid.UUID(org_id)
     except ValueError:
@@ -90,8 +106,14 @@ def get_organization(org_id: str, db: Session = Depends(get_db), request: Reques
 
 
 @router.put("/{org_id}", response_model=OrganizationResponse)
-def update_organization(org_id: str, org_update: OrganizationUpdate, db: Session = Depends(get_db), request: Request = None):
-    """Update organization details (Admin only)"""
+def update_organization(
+    org_id: str,
+    org_update: OrganizationUpdate,
+    current_user: User = Depends(require_organizations_endpoint_access()),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """Update organization details (PRODUCT_SUPPORT_ADMIN only)"""
     try:
         org_uuid = uuid.UUID(org_id)
     except ValueError:
@@ -129,8 +151,13 @@ def update_organization(org_id: str, org_update: OrganizationUpdate, db: Session
 
 
 @router.delete("/{org_id}")
-def deactivate_organization(org_id: str, db: Session = Depends(get_db), request: Request = None):
-    """Deactivate organization (Admin only) - Soft delete"""
+def deactivate_organization(
+    org_id: str,
+    current_user: User = Depends(require_organizations_endpoint_access()),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """Deactivate organization (PRODUCT_SUPPORT_ADMIN only) - Soft delete"""
     try:
         org_uuid = uuid.UUID(org_id)
     except ValueError:

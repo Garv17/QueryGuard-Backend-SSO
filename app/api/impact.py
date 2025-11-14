@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
 from app.services.impact_analysis import schema_detection_rag, dbt_model_detection_rag, fetch_queries
-from app.api.auth import get_current_user
+from app.utils.auth_deps import get_current_user
 from app.utils.models import User
 from app.database import get_db
 

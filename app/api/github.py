@@ -16,7 +16,8 @@ import json
 import requests
 from app.database import get_db
 from app.utils.models import GitHubInstallation, GitHubRepository, Organization, User, GitHubPullRequestAnalysis
-from app.api.auth import get_current_user
+from app.utils.auth_deps import get_current_user
+from app.utils.rbac import require_connector_access
 import uuid
 from uuid import UUID
 from datetime import datetime
@@ -384,7 +385,7 @@ def list_repositories(installation_id: str, current_user: User = Depends(get_cur
 
 
 @router.post("/sync-repositories/{installation_id}")
-def sync_repositories(installation_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def sync_repositories(installation_id: str, current_user: User = Depends(require_connector_access()), db: Session = Depends(get_db)):
     """Sync repositories for an installation (manual trigger)"""
     try:
         inst_uuid = uuid.UUID(installation_id)
@@ -468,7 +469,7 @@ def sync_repositories(installation_id: str, current_user: User = Depends(get_cur
 
 
 @router.delete("/installations/{installation_id}")
-def deactivate_installation(installation_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def deactivate_installation(installation_id: str, current_user: User = Depends(require_connector_access()), db: Session = Depends(get_db)):
     """Deactivate a GitHub installation (soft delete)"""
     try:
         inst_uuid = uuid.UUID(installation_id)
@@ -673,7 +674,7 @@ async def github_webhook(request: Request, db=Depends(get_db)):
 
 
 @router.post("/process-pr")
-def process_pr_changes(pr_request: PRProcessRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def process_pr_changes(pr_request: PRProcessRequest, current_user: User = Depends(require_connector_access()), db: Session = Depends(get_db)):
     """Process PR changes and add comment to PR"""
     try:
         inst_uuid = uuid.UUID(pr_request.installation_id)

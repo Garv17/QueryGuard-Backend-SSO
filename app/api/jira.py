@@ -19,7 +19,8 @@ from uuid import UUID
 from datetime import datetime
 from app.database import get_db
 from app.utils.models import JiraConnection, JiraTicket, User
-from app.api.auth import get_current_user
+from app.utils.auth_deps import get_current_user
+from app.utils.rbac import require_connector_access
 import logging
 
 router = APIRouter(prefix="/jira", tags=["Jira"])
@@ -241,7 +242,7 @@ class IssueTypeResponse(BaseModel):
 @router.post("/test-connection")
 def test_connection(
     conn: JiraConnectionRequest, 
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_connector_access()),
     request: Request = None
 ):
     """Test Jira connection before saving"""
@@ -259,7 +260,7 @@ def test_connection(
 @router.post("/save-connection", response_model=JiraConnectionResponse, status_code=status.HTTP_201_CREATED)
 def save_connection(
     conn: JiraConnectionRequest, 
-    current_user: User = Depends(get_current_user), 
+    current_user: User = Depends(require_connector_access()), 
     db: Session = Depends(get_db),
     request: Request = None
 ):
@@ -406,7 +407,7 @@ def get_issue_types(
 @router.post("/create-ticket", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
 def create_ticket(
     ticket_request: CreateTicketRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_connector_access()),
     db: Session = Depends(get_db),
     request: Request = None
 ):
@@ -490,7 +491,7 @@ def list_tickets(
 @router.delete("/connections/{connection_id}")
 def deactivate_connection(
     connection_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_connector_access()),
     db: Session = Depends(get_db),
     request: Request = None
 ):
