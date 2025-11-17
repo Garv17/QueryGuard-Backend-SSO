@@ -6,30 +6,28 @@
 # GET /auth/me → get current user info
 
 from fastapi import APIRouter, HTTPException, Depends, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from uuid import UUID
-from jose import jwt, JWTError
+from jose import jwt
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.utils.models import User, UserToken, Organization
+from app.utils.rbac import MEMBER
+from app.utils.auth_deps import get_current_user, SECRET_KEY, ALGORITHM
+from app.utils.email_service import send_password_reset_email
 import hashlib
 import uuid
 import os
-import random
+import secrets
 import logging
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 logger = logging.getLogger("auth")
 
 # --- Config ---
-SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey") 
-ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
-
-security = HTTPBearer()
 
 
 # --- Models ---
@@ -37,7 +35,6 @@ class UserSignup(BaseModel):
     username: str
     password: str
     email: EmailStr
-    org_id: str
 
 class UserLogin(BaseModel):
     username: str
@@ -47,8 +44,7 @@ class ForgotPassword(BaseModel):
     email: EmailStr
 
 class ResetPassword(BaseModel):
-    email: str
-    otp: str
+    token: str
     new_password: str
 
 class UserResponse(BaseModel):
@@ -56,6 +52,7 @@ class UserResponse(BaseModel):
     username: str
     email: str
     org_id: UUID
+    role: str
 
     class Config:
         from_attributes = True
@@ -65,9 +62,9 @@ class UserResponse(BaseModel):
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
-def generate_otp() -> str:
-    """Generate a 6-digit OTP"""
-    return str(random.randint(100000, 999999))
+def generate_reset_token() -> str:
+    """Generate a secure random token for password reset"""
+    return secrets.token_urlsafe(32)
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
@@ -75,49 +72,21 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def verify_token(raw_token: str):
-    try:
-        payload = jwt.decode(raw_token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
-):
-    raw_token = credentials.credentials
-    payload = verify_token(raw_token)
-    user_id: str = payload.get("sub")
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
-
-    # Check if token exists and is not revoked
-    token_record = db.query(UserToken).filter(
-        UserToken.token == raw_token,
-        UserToken.is_revoked == False,
-        UserToken.expires_at > datetime.utcnow()
-    ).first()
-    
-    if not token_record:
-        raise HTTPException(status_code=401, detail="Token revoked or expired")
-
-    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found or inactive")
-    
-    return user
-
 
 # --- Endpoints ---
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
-def signup(user: UserSignup, db: Session = Depends(get_db), request: Request = None):
-    logger.info("POST /auth/signup - attempt for username=%s org_id=%s ip=%s", user.username, user.org_id, request.client.host if request and request.client else "unknown")
+def signup(user: UserSignup, org_id: str, db: Session = Depends(get_db), request: Request = None):
+    """
+    Public signup endpoint - creates users with MEMBER role only.
+    For creating users with other roles, use /users endpoint (requires authentication and appropriate role).
+    org_id should be provided as a query parameter in the signup link.
+    """
+    logger.info("POST /auth/signup - attempt for username=%s org_id=%s ip=%s", user.username, org_id, request.client.host if request and request.client else "unknown")
     # Validate org_id format
     try:
-        org_uuid = uuid.UUID(user.org_id)
+        org_uuid = uuid.UUID(org_id)
     except ValueError:
-        logger.warning("/auth/signup - invalid org_id format: %s", user.org_id)
+        logger.warning("/auth/signup - invalid org_id format: %s", org_id)
         raise HTTPException(status_code=400, detail="Invalid organization ID format")
     
     # Check if organization exists and is active
@@ -141,18 +110,20 @@ def signup(user: UserSignup, db: Session = Depends(get_db), request: Request = N
         logger.warning("/auth/signup - email exists: %s", user.email)
         raise HTTPException(status_code=400, detail="Email already exists")
 
+    # Public signup always creates MEMBER role users
     new_user = User(
         username=user.username,
         email=user.email,
         password_hash=hash_password(user.password),
-        org_id=org_uuid
+        org_id=org_uuid,
+        role=MEMBER
     )
     
     try:
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
-        logger.info("/auth/signup - user created id=%s", new_user.id)
+        logger.info("/auth/signup - user created id=%s role=%s", new_user.id, new_user.role)
         return {"message": "User registered successfully"}
     except IntegrityError:
         db.rollback()
@@ -199,41 +170,43 @@ def forgot_password(req: ForgotPassword, db: Session = Depends(get_db), request:
         logger.warning("/auth/forgot-password - email not found: %s", req.email)
         raise HTTPException(status_code=404, detail="Email not found")
 
-    # Generate 6-digit OTP
-    otp = generate_otp()
-    user.password_reset_otp = otp
-    user.reset_otp_expires = datetime.utcnow() + timedelta(minutes=60)  # 60 minute expiry
+    # Generate secure reset token
+    reset_token = generate_reset_token()
+    user.password_reset_token = reset_token
+    user.password_reset_token_expires = datetime.utcnow() + timedelta(minutes=60)  # 60 minute expiry
     
     db.commit()
     
-    # TODO: Send email with OTP
-    # In production, implement email sending here
-    # For now, return OTP in response (remove this in production)
-    logger.info("/auth/forgot-password - OTP generated for user_id=%s", user.id)
+    # Send email with reset link
+    email_sent = send_password_reset_email(req.email, reset_token)
+    if not email_sent:
+        logger.error("/auth/forgot-password - failed to send email to %s for user_id=%s", req.email, user.id)
+        # Still return success to prevent email enumeration attacks
+        # The token is still generated and stored, but email delivery failed
+    
+    logger.info("/auth/forgot-password - reset token generated for user_id=%s, email_sent=%s", user.id, email_sent)
     return {
-        "message": "Password reset OTP generated and sent to email",
-        "otp": otp,  # Remove this in production
-        "note": "OTP expires in 60 minutes"
+        "message": "If the email exists, a password reset link has been sent to your email address",
+        "note": "The link will expire in 60 minutes"
     }
 
 
 @router.post("/reset-password")
 def reset_password(req: ResetPassword, db: Session = Depends(get_db), request: Request = None):
-    logger.info("POST /auth/reset-password - email=%s ip=%s", req.email, request.client.host if request and request.client else "unknown")
+    logger.info("POST /auth/reset-password - token=%s ip=%s", req.token[:10] + "..." if len(req.token) > 10 else req.token, request.client.host if request and request.client else "unknown")
     user = db.query(User).filter(
-        User.email == req.email,
-        User.password_reset_otp == req.otp,
-        User.reset_otp_expires > datetime.utcnow(),
+        User.password_reset_token == req.token,
+        User.password_reset_token_expires > datetime.utcnow(),
         User.is_active == True
     ).first()
     
     if not user:
-        logger.warning("/auth/reset-password - invalid/expired OTP for email=%s", req.email)
-        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+        logger.warning("/auth/reset-password - invalid/expired token")
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
 
     user.password_hash = hash_password(req.new_password)
-    user.password_reset_otp = None
-    user.reset_otp_expires = None
+    user.password_reset_token = None
+    user.password_reset_token_expires = None
     
     # Revoke all existing tokens for this user
     db.query(UserToken).filter(UserToken.user_id == user.id).update({"is_revoked": True})

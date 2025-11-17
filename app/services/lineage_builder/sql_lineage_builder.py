@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, List, Tuple, Union
+from typing import Any, Dict, Optional, List, Tuple, Union, Set
 from collections import defaultdict
 
 from .schema_resolver import SchemaResolver
@@ -178,9 +178,9 @@ def _build_lineage_enhanced(
     last_result: Optional[SqlParsingResult] = None
 
     for stmt in statements:
-        stmt_sql = stmt.sql(dialect=dialect_obj)
+        stmt_input = stmt if isinstance(stmt, str) else stmt
         result: SqlParsingResult = sqlglot_lineage(
-            stmt_sql,
+            stmt_input,
             schema_resolver=resolver,
             default_db=default_db,
             default_schema=default_schema,
@@ -400,9 +400,9 @@ def _build_lineage_legacy(
         return out
 
     for stmt in statements:
-        stmt_sql = stmt if isinstance(stmt, str) else stmt.sql(dialect=dialect_obj)
+        stmt_input = stmt if isinstance(stmt, str) else stmt
         result: SqlParsingResult = sqlglot_lineage(
-            stmt_sql,
+            stmt_input,
             schema_resolver=resolver,
             default_db=default_db,
             default_schema=default_schema,
@@ -465,12 +465,11 @@ def _result_to_dict(result: SqlParsingResult) -> Dict[str, Any]:
 
 
 def _build_mappings_from_lineage(column_lineage: List[Dict[str, Any]]) -> List[str]:
-    """Build source_to_target mappings from column lineage"""
-    
+    """Build source_to_target mappings from column lineage with transitive dependency expansion."""
+
     def _split_urn(urn: Optional[str]) -> Tuple[str, str, str]:
         if not urn:
             return "", "", ""
-        # Format: platform://ENV/db.schema.table
         try:
             _, rest = urn.split("://", 1)
             _, path = rest.split("/", 1)
@@ -483,24 +482,119 @@ def _build_mappings_from_lineage(column_lineage: List[Dict[str, Any]]) -> List[s
             return "", parts[0], parts[1]
         if len(parts) == 1:
             return "", "", parts[0]
-        # More than 3 segments, take last 3 as db.schema.table
         return parts[-3], parts[-2], parts[-1]
 
-    mappings: List[str] = []
+    def _node_key(table: Optional[str], column: Optional[str]) -> Tuple[str, str]:
+        return (table or "", column or "")
+
+    adjacency: Dict[Tuple[str, str], Set[Tuple[str, str]]] = defaultdict(set)
+    node_meta: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
     for cli in column_lineage:
-        tgt_urn = cli["downstream"]["table"]
-        tgt_col = cli["downstream"]["column"]
-        tgt_db, tgt_schema, tgt_table = _split_urn(tgt_urn)
+        downstream = cli.get("downstream", {})
+        tgt_table = downstream.get("table")
+        tgt_col = downstream.get("column")
+        if not tgt_col:
+            continue
+        tgt_key = _node_key(tgt_table, tgt_col)
+        if tgt_key not in node_meta:
+            node_meta[tgt_key] = {
+                "table": tgt_table,
+                "column": tgt_col,
+                "native_column_type": downstream.get("native_column_type"),
+            }
+
+        upstreams = cli.get("upstreams") or []
+        if not upstreams:
+            adjacency.setdefault(tgt_key, set())
+        for up in upstreams:
+            src_table = up.get("table")
+            src_col = up.get("column")
+            if not src_col:
+                continue
+            src_key = _node_key(src_table, src_col)
+            adjacency[tgt_key].add(src_key)
+            if src_key not in node_meta:
+                node_meta[src_key] = {
+                    "table": src_table,
+                    "column": src_col,
+                    "native_column_type": None,
+                }
+
+    memo: Dict[Tuple[str, str], Set[Tuple[str, str]]] = {}
+
+    def _resolve_sources(node: Tuple[str, str], stack: Optional[Set[Tuple[str, str]]] = None) -> Set[Tuple[str, str]]:
+        if node in memo:
+            return memo[node]
+
+        if stack is None:
+            stack = set()
+        if node in stack:
+            # Cycle detected; stop expanding further
+            memo[node] = {node}
+            return memo[node]
+
+        stack.add(node)
+        upstream_nodes = adjacency.get(node, set())
+        if not upstream_nodes:
+            result = {node}
+        else:
+            result: Set[Tuple[str, str]] = set()
+            for upstream_node in upstream_nodes:
+                result.update(_resolve_sources(upstream_node, stack))
+            if not result:
+                result = {node}
+        stack.remove(node)
+        memo[node] = result
+        return result
+
+    mappings_set: Set[str] = set()
+
+    for cli in column_lineage:
+        downstream = cli.get("downstream", {})
+        tgt_table = downstream.get("table")
+        tgt_col = downstream.get("column")
         if not tgt_table or not tgt_col:
             continue
-        for up in cli["upstreams"]:
-            src_urn = up["table"]
-            src_col = up["column"]
-            src_db, src_schema, src_table = _split_urn(src_urn)
-            tgt = ".".join(filter(None, [tgt_db, tgt_schema, tgt_table, tgt_col]))
-            src = ".".join(filter(None, [src_db, src_schema, src_table, src_col]))
-            mappings.append(f"{tgt} <- {src}")
 
-    return mappings
+        tgt_key = _node_key(tgt_table, tgt_col)
+        base_nodes = {
+            node for node in _resolve_sources(tgt_key)
+            if node != tgt_key
+        }
+        direct_nodes = adjacency.get(tgt_key, set())
+
+        candidate_nodes = set()
+        candidate_nodes.update(base_nodes)
+        candidate_nodes.update(direct_nodes)
+
+        if not candidate_nodes:
+            continue
+
+        tgt_db, tgt_schema, tgt_table_name = _split_urn(tgt_table)
+        if not tgt_table_name:
+            continue
+
+        for src_key in candidate_nodes:
+            src_meta = node_meta.get(src_key)
+            if not src_meta:
+                continue
+            src_table = src_meta.get("table")
+            src_col = src_meta.get("column")
+            if not src_table or not src_col:
+                continue
+
+            src_db, src_schema, src_table_name = _split_urn(src_table)
+            if not src_table_name:
+                continue
+
+            tgt = ".".join(filter(None, [tgt_db, tgt_schema, tgt_table_name, tgt_col]))
+            src = ".".join(filter(None, [src_db, src_schema, src_table_name, src_col]))
+            if not src:
+                continue
+
+            mappings_set.add(f"{tgt} <- {src}")
+
+    return sorted(mappings_set)
 
 

@@ -534,4 +534,3 @@ def lineage_builder(org_id, conn_id, batch_id):
         logger.critical("Fatal error in main execution: %s", e)
         logger.critical("Full traceback: %s", traceback.format_exc())
         raise
-

@@ -7,7 +7,8 @@ from app.utils.models import SnowflakeConnection, SnowflakeJob
 from app.utils.websocket_manager import websocket_manager
 import threading
 import asyncio
-from app.api import auth, organizations, snowflake, github, jira, impact, dbt_cloud, chat
+from app.api import auth, organizations, snowflake, github, jira, impact, dbt_cloud, chat, users
+from scripts import init_product_support_admin
 import logging
 import sys
 from app.vector_db import upsert_lineage_embeddings
@@ -116,12 +117,15 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router)
 app.include_router(organizations.router)
+app.include_router(users.router)
 app.include_router(snowflake.router)
 app.include_router(github.router)
 app.include_router(jira.router)
 app.include_router(impact.router)
 app.include_router(dbt_cloud.router)
 app.include_router(chat.router)
+# TEMPORARY: Initialization endpoint - remove after setup
+app.include_router(init_product_support_admin.router)
 
 @app.on_event("startup")
 async def startup_event():

@@ -6,7 +6,8 @@ from pydantic import BaseModel, HttpUrl
 import requests
 from app.database import get_db
 from app.utils.models import DbtCloudConnection, DbtJob, User
-from app.api.auth import get_current_user
+from app.utils.auth_deps import get_current_user
+from app.utils.rbac import require_connector_access
 import logging
 from app.services.dbt_crawler import sync_dbt_metadata
 
@@ -96,7 +97,7 @@ def _test_dbt_cloud_connection(api_key: str, account_id: str, base_url: str) -> 
 @router.post("/test-connection")
 def test_connection(
     conn: DbtCloudConnRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_connector_access()),
     request: Request = None,
 ):
     result = _test_dbt_cloud_connection(conn.api_key, conn.account_id, str(conn.base_url))
@@ -115,7 +116,7 @@ def test_connection(
 @router.post("/save-connection", response_model=DbtCloudConnectionResponse, status_code=status.HTTP_201_CREATED)
 def save_connection(
     conn: DbtCloudConnRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_connector_access()),
     db: Session = Depends(get_db),
     request: Request = None,
 ):
@@ -180,7 +181,7 @@ def list_connections(
 def set_schedule(
     connection_id: str,
     body: DbtScheduleRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_connector_access()),
     db: Session = Depends(get_db),
     request: Request = None,
 ):
@@ -206,7 +207,7 @@ def set_schedule(
 
 
 @router.post("/sync/{connection_id}")
-def sync(connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
+def sync(connection_id: str, current_user: User = Depends(require_connector_access()), db: Session = Depends(get_db), request: Request = None):
     # Ensure connection belongs to org
     conn = db.query(DbtCloudConnection).filter(
         DbtCloudConnection.id == connection_id,
