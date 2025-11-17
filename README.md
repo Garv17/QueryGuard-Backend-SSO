@@ -1,6 +1,6 @@
 # QueryGuardAI Backend
 
-A FastAPI-based backend for QueryGuardAI - a data lineage and impact analysis tool for Snowflake queries with multi-tenant Snowflake crawler service.
+A FastAPI-based backend for QueryGuardAI - a data lineage and impact analysis tool for Snowflake queries with multi-tenant Snowflake crawler service and real-time WebSocket chat functionality.
 
 ## Features
 
@@ -14,6 +14,10 @@ A FastAPI-based backend for QueryGuardAI - a data lineage and impact analysis to
 - Comprehensive audit trail for all crawler operations
 - GitHub App integration for repository monitoring
 - Jira integration for ticket management
+- **Real-time WebSocket chat with AI assistant**
+- **Multi-user chat rooms organized by organization**
+- **Typing indicators and user status tracking**
+- **Automatic session management and cleanup**
 
 ## Setup
 
@@ -112,11 +116,22 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `POST /github/webhook` - Handle GitHub webhook events (PR events)
 - `POST /github/process-pr` - Process PR changes and add comment
 
+### WebSocket Chat (Real-time)
+
+- `WS /chat/ws/{org_id}/{user_id}` - WebSocket connection for real-time chat
+  - Query Parameters: `session_id` (optional), `user_name` (optional)
+  - Supports: chat messages, typing indicators, user status, AI responses
+- `GET /chat/sessions/{org_id}` - Get active chat sessions for organization
+- `GET /chat/stats` - Get WebSocket connection statistics
+- `POST /chat/cleanup?timeout_minutes=30` - Manual cleanup of inactive sessions
+- `GET /chat/test-page` - Built-in WebSocket test interface
+- `POST /chat/query` - Traditional REST API for chat (existing endpoint)
+
 ### Health Check & Monitoring
 
 - `GET /` - API information
 - `GET /health` - Health check endpoint
-- `GET /worker-status` - Check background worker status
+- `GET /worker-status` - Check background worker status (includes WebSocket stats)
 
 ## Database Schema
 
@@ -354,6 +369,76 @@ The crawler uses enhanced logging with emojis for better visibility:
 - `0 */2 * * *`: Every 2 hours
 - `0 9 * * 1`: Weekly on Monday at 9 AM
 - `*/5 * * * *`: Every 5 minutes (for testing)
+
+## WebSocket Real-Time Chat
+
+### Overview
+The WebSocket integration provides real-time bidirectional communication for chat functionality with the QueryGuard AI assistant. Users can send messages and receive immediate AI responses with typing indicators and user status updates.
+
+### WebSocket Connection
+**URL**: `ws://localhost:8000/chat/ws/{org_id}/{user_id}`
+
+**Query Parameters**:
+- `session_id` (optional): Custom session ID, auto-generated if not provided
+- `user_name` (optional): Display name for the user
+
+**Example**:
+```
+ws://localhost:8000/chat/ws/76d33fb3-6062-456b-a211-4aec9971f8be/user123?user_name=John%20Doe
+```
+
+### Message Types
+
+#### Outgoing (Client → Server)
+```json
+// Chat Message
+{
+  "type": "chat_message",
+  "content": "Your question here"
+}
+
+// Typing Indicator
+{
+  "type": "typing", 
+  "data": {"is_typing": true}
+}
+
+// Ping (Keep-alive)
+{
+  "type": "ping"
+}
+```
+
+#### Incoming (Server → Client)
+- `system_message` - Connection status, welcome messages
+- `chat_message` - User messages broadcast to all org users
+- `ai_response` - AI assistant responses with sources
+- `typing` - Typing indicators from users or AI
+- `user_status` - User join/leave notifications
+- `error` - Error messages
+- `pong` - Response to ping
+
+### Features
+- **Multi-user chat rooms** organized by organization
+- **Real-time AI responses** integrated with vector database
+- **Typing indicators** for users and AI assistant
+- **User status tracking** (join/leave events)
+- **Automatic session cleanup** for inactive connections
+- **Error handling** with graceful fallbacks
+- **Broadcasting** messages to all users in organization
+
+### Testing
+1. **Built-in test page**: Navigate to `http://localhost:8000/chat/test-page`
+2. **Python client**: Use `websocket_client_example.py`
+3. **JavaScript**: See `WEBSOCKET_INTEGRATION.md` for client examples
+
+### Documentation
+See `WEBSOCKET_INTEGRATION.md` for comprehensive documentation including:
+- Message format specifications
+- Client implementation examples
+- Architecture overview
+- Security considerations
+- Troubleshooting guide
 
 ## GitHub App Setup
 

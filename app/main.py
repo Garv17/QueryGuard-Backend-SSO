@@ -4,7 +4,9 @@ from app.database import init_db, SessionLocal
 from app.snowflake_crawler import polling_worker as snowflake_polling_worker
 from app.services.dbt_crawler import polling_worker as dbt_polling_worker
 from app.utils.models import SnowflakeConnection, SnowflakeJob
+from app.utils.websocket_manager import websocket_manager
 import threading
+import asyncio
 from app.api import auth, organizations, snowflake, github, jira, impact, dbt_cloud, chat, users
 from scripts import init_product_support_admin
 import logging
@@ -159,6 +161,9 @@ async def startup_event():
     )
     app.state.dbt_worker_thread.start()
     
+    # Start WebSocket cleanup task
+    app.state.websocket_cleanup_task = asyncio.create_task(websocket_cleanup_worker())
+    
     # Verify worker started
     if app.state.worker_thread.is_alive():
         logger.info("🔄 Snowflake crawler worker started")
@@ -169,12 +174,34 @@ async def startup_event():
     else:
         logger.error("❌ Failed to start dbt crawler worker")
     
+    logger.info("🔗 WebSocket manager initialized")
     logger.info("✅ Application startup completed")
+
+async def websocket_cleanup_worker():
+    """Background task to cleanup inactive WebSocket sessions"""
+    while True:
+        try:
+            await asyncio.sleep(300)  # Run every 5 minutes
+            await websocket_manager.cleanup_inactive_sessions(timeout_minutes=30)
+        except asyncio.CancelledError:
+            logger.info("WebSocket cleanup worker cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error in WebSocket cleanup worker: {str(e)}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop background worker on shutdown"""
     logger.info("🛑 Application shutdown initiated")
+    
+    # Cancel WebSocket cleanup task
+    if hasattr(app.state, 'websocket_cleanup_task'):
+        app.state.websocket_cleanup_task.cancel()
+        try:
+            await app.state.websocket_cleanup_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("🔗 WebSocket cleanup worker stopped")
     
     if hasattr(app.state, 'worker_stop_event'):
         app.state.worker_stop_event.set()
@@ -217,7 +244,8 @@ async def worker_status(request: Request):
         "thread_alive": False,
         "thread_name": None,
         "thread_id": None,
-        "stop_event_set": False
+        "stop_event_set": False,
+        "websocket_stats": {}
     }
     
     if hasattr(app.state, 'worker_thread'):
@@ -228,6 +256,12 @@ async def worker_status(request: Request):
     
     if hasattr(app.state, 'worker_stop_event'):
         status["stop_event_set"] = app.state.worker_stop_event.is_set()
+    
+    # Add WebSocket statistics
+    try:
+        status["websocket_stats"] = websocket_manager.get_stats()
+    except Exception as e:
+        status["websocket_stats"] = {"error": str(e)}
     
     logger.info("Worker status: %s", status)
     return status
