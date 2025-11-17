@@ -133,8 +133,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `email` (String) - Unique email
 - `password_hash` (String) - Hashed password
 - `org_id` (UUID) - Foreign key to organizations
-- `password_reset_otp` (String) - Password reset OTP (6 digits)
-- `reset_otp_expires` (DateTime) - OTP expiry
+- `password_reset_token` (String) - Password reset token
+- `password_reset_token_expires` (DateTime) - Token expiry
 - `is_active` (Boolean) - User status
 - `created_at` (DateTime) - Creation timestamp
 - `updated_at` (DateTime) - Last update timestamp
@@ -444,7 +444,7 @@ POST /init-setup
 
 - Passwords are hashed using SHA-256
 - JWT tokens are stored in the database for revocation capability
-- Password reset OTPs expire after 60 minutes
+- Password reset tokens expire after 60 minutes
 - All sensitive operations require authentication
 - Role-based access control enforced on all endpoints
 - Organization-level data isolation

@@ -16,10 +16,11 @@ from app.database import get_db
 from app.utils.models import User, UserToken, Organization
 from app.utils.rbac import MEMBER
 from app.utils.auth_deps import get_current_user, SECRET_KEY, ALGORITHM
+from app.utils.email_service import send_password_reset_email
 import hashlib
 import uuid
 import os
-import random
+import secrets
 import logging
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -43,8 +44,7 @@ class ForgotPassword(BaseModel):
     email: EmailStr
 
 class ResetPassword(BaseModel):
-    email: str
-    otp: str
+    token: str
     new_password: str
 
 class UserResponse(BaseModel):
@@ -62,9 +62,9 @@ class UserResponse(BaseModel):
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
-def generate_otp() -> str:
-    """Generate a 6-digit OTP"""
-    return str(random.randint(100000, 999999))
+def generate_reset_token() -> str:
+    """Generate a secure random token for password reset"""
+    return secrets.token_urlsafe(32)
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
@@ -170,41 +170,43 @@ def forgot_password(req: ForgotPassword, db: Session = Depends(get_db), request:
         logger.warning("/auth/forgot-password - email not found: %s", req.email)
         raise HTTPException(status_code=404, detail="Email not found")
 
-    # Generate 6-digit OTP
-    otp = generate_otp()
-    user.password_reset_otp = otp
-    user.reset_otp_expires = datetime.utcnow() + timedelta(minutes=60)  # 60 minute expiry
+    # Generate secure reset token
+    reset_token = generate_reset_token()
+    user.password_reset_token = reset_token
+    user.password_reset_token_expires = datetime.utcnow() + timedelta(minutes=60)  # 60 minute expiry
     
     db.commit()
     
-    # TODO: Send email with OTP
-    # In production, implement email sending here
-    # For now, return OTP in response (remove this in production)
-    logger.info("/auth/forgot-password - OTP generated for user_id=%s", user.id)
+    # Send email with reset link
+    email_sent = send_password_reset_email(req.email, reset_token)
+    if not email_sent:
+        logger.error("/auth/forgot-password - failed to send email to %s for user_id=%s", req.email, user.id)
+        # Still return success to prevent email enumeration attacks
+        # The token is still generated and stored, but email delivery failed
+    
+    logger.info("/auth/forgot-password - reset token generated for user_id=%s, email_sent=%s", user.id, email_sent)
     return {
-        "message": "Password reset OTP generated and sent to email",
-        "otp": otp,  # Remove this in production
-        "note": "OTP expires in 60 minutes"
+        "message": "If the email exists, a password reset link has been sent to your email address",
+        "note": "The link will expire in 60 minutes"
     }
 
 
 @router.post("/reset-password")
 def reset_password(req: ResetPassword, db: Session = Depends(get_db), request: Request = None):
-    logger.info("POST /auth/reset-password - email=%s ip=%s", req.email, request.client.host if request and request.client else "unknown")
+    logger.info("POST /auth/reset-password - token=%s ip=%s", req.token[:10] + "..." if len(req.token) > 10 else req.token, request.client.host if request and request.client else "unknown")
     user = db.query(User).filter(
-        User.email == req.email,
-        User.password_reset_otp == req.otp,
-        User.reset_otp_expires > datetime.utcnow(),
+        User.password_reset_token == req.token,
+        User.password_reset_token_expires > datetime.utcnow(),
         User.is_active == True
     ).first()
     
     if not user:
-        logger.warning("/auth/reset-password - invalid/expired OTP for email=%s", req.email)
-        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+        logger.warning("/auth/reset-password - invalid/expired token")
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
 
     user.password_hash = hash_password(req.new_password)
-    user.password_reset_otp = None
-    user.reset_otp_expires = None
+    user.password_reset_token = None
+    user.password_reset_token_expires = None
     
     # Revoke all existing tokens for this user
     db.query(UserToken).filter(UserToken.user_id == user.id).update({"is_revoked": True})
