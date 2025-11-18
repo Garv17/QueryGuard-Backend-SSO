@@ -444,6 +444,261 @@ def _create_table_ddl_cll(
 
     return column_lineage
 
+def _build_alias_resolution_maps(
+    root_scope: sqlglot.optimizer.Scope,
+) -> Tuple[Dict[str, _TableName], Dict[str, sqlglot.optimizer.Scope]]:
+    alias_map: Dict[str, _TableName] = {}
+
+    cte_map: Dict[str, sqlglot.optimizer.Scope] = {}
+
+    for scope in root_scope.traverse():
+        sources = getattr(scope, "sources", {})
+        for alias, table_expr in sources.items():
+            if isinstance(table_expr, sqlglot.exp.Table):
+                table_name = _TableName.from_sqlglot_table(table_expr)
+                alias_map[alias.upper()] = table_name
+                alias_map[alias.lower()] = table_name
+            elif isinstance(table_expr, sqlglot.optimizer.Scope):
+                cte_map[alias.upper()] = table_expr
+                cte_map[alias.lower()] = table_expr
+
+    cte_sources = getattr(root_scope, "cte_sources", {}) or {}
+    for name, scope in cte_sources.items():
+        cte_map[name.upper()] = scope
+        cte_map[name.lower()] = scope
+
+    return alias_map, cte_map
+
+
+def _derive_upstreams_via_alias_walk(
+    lineage_node: sqlglot.lineage.Node,
+    alias_map: Optional[Dict[str, _TableName]],
+    cte_map: Optional[Dict[str, sqlglot.optimizer.Scope]],
+) -> OrderedSet[_ColumnRef]:
+    fallback_upstreams: OrderedSet[_ColumnRef] = OrderedSet()
+    if alias_map is None and cte_map is None:
+        return fallback_upstreams
+
+    for node in lineage_node.walk():
+        expr = node.expression
+        if isinstance(expr, sqlglot.exp.Alias):
+            column_expr = expr.this
+            if isinstance(column_expr, sqlglot.exp.Column):
+                column_name = column_expr.name
+                table_alias = getattr(column_expr.table, "name", None)
+                if table_alias is None:
+                    if isinstance(column_expr.table, sqlglot.exp.Identifier):
+                        table_alias = column_expr.table.name
+                    elif isinstance(column_expr.table, str):
+                        table_alias = column_expr.table
+                if column_name and table_alias:
+                    resolved = _resolve_alias_to_table(
+                        str(table_alias),
+                        column_name,
+                        alias_map,
+                        cte_map,
+                    )
+                    if resolved:
+                        resolved_table, resolved_column = resolved
+                        fallback_upstreams.add(
+                            _ColumnRef(
+                                table=resolved_table,
+                                column=resolved_column,
+                            )
+                        )
+    return fallback_upstreams
+
+
+def _is_sequence_like_expression(expression: Optional[sqlglot.exp.Expression]) -> bool:
+    if expression is None:
+        return False
+
+    for node in expression.walk():
+        if isinstance(node, sqlglot.exp.NextValueFor):
+            return True
+        if isinstance(node, sqlglot.exp.Identifier):
+            name = (getattr(node, "name", None) or "").upper()
+            if name in {"NEXTVAL", "CURRVAL"}:
+                return True
+        if isinstance(node, sqlglot.exp.Anonymous):
+            func_name = (node.name or "").upper()
+            if func_name in {"NEXTVAL", "CURRVAL"}:
+                return True
+    return False
+
+
+def _resolve_alias_to_table(
+    alias: Optional[str],
+    column_name: str,
+    alias_map: Optional[Dict[str, _TableName]],
+    cte_map: Optional[Dict[str, sqlglot.optimizer.Scope]],
+    seen: Optional[Set[str]] = None,
+) -> Optional[Tuple[_TableName, str]]:
+    if not alias:
+        return None
+
+    alias_key = alias.upper()
+
+    if seen is None:
+        seen = set()
+    if alias_key in seen:
+        return None
+    seen.add(alias_key)
+
+    def _resolve_table_ref(table_ref: _TableName, column: str) -> Optional[Tuple[_TableName, str]]:
+        if (
+            not table_ref.database
+            and table_ref.table
+            and cte_map
+            and table_ref.table.upper() in cte_map
+        ):
+            return _resolve_alias_to_table(
+                table_ref.table,
+                column,
+                alias_map,
+                cte_map,
+                seen,
+            )
+        return (table_ref, column)
+
+    if alias_map and alias_key in alias_map:
+        table_ref = alias_map[alias_key]
+        resolved = _resolve_table_ref(table_ref, column_name)
+        if resolved:
+            return resolved
+        return table_ref, column_name
+
+    if cte_map and alias_key in cte_map:
+        scope = cte_map[alias_key]
+        alias_resolution_attempted = False
+        select_expressions = getattr(getattr(scope, "expression", None), "expressions", []) or []
+        target_select_expr: Optional[sqlglot.exp.Expression] = None
+        for expr in select_expressions:
+            if isinstance(expr, sqlglot.exp.Alias):
+                alias_name = expr.alias_or_name
+                if alias_name and alias_name.upper() == column_name.upper():
+                    if target_select_expr is None:
+                        target_select_expr = expr
+                    column_expr = expr.this
+                    if isinstance(column_expr, sqlglot.exp.Column):
+                        col_identifier = column_expr.name
+                        table_alias = getattr(column_expr.table, "name", None) or getattr(column_expr.table, "this", None)
+                        if table_alias is None and isinstance(column_expr.table, sqlglot.exp.Identifier):
+                            table_alias = column_expr.table.name
+                        elif isinstance(column_expr.table, str):
+                            table_alias = column_expr.table
+                        if table_alias and col_identifier:
+                            alias_resolution_attempted = True
+                            resolved = _resolve_alias_to_table(
+                                str(table_alias),
+                                col_identifier,
+                                alias_map,
+                                cte_map,
+                                seen,
+                            )
+                            if resolved:
+                                return resolved
+                        elif col_identifier:
+                            sources_dict = getattr(scope, "sources", {}) or {}
+                            for source_alias, table_expr in sources_dict.items():
+                                try:
+                                    source_columns = scope.source_columns(source_alias)
+                                except TypeError:
+                                    source_columns = []
+                                for source_col in source_columns or []:
+                                    source_name = getattr(source_col.this, "name", None) or getattr(source_col, "name", None)
+                                    if source_name and source_name.upper() == col_identifier.upper():
+                                        alias_resolution_attempted = True
+                                        resolved = _resolve_alias_to_table(
+                                            str(source_alias),
+                                            col_identifier,
+                                            alias_map,
+                                            cte_map,
+                                            seen,
+                                        )
+                                        if resolved:
+                                            return resolved
+                                        break
+        if target_select_expr is not None:
+            value_expr = target_select_expr.this if isinstance(target_select_expr, sqlglot.exp.Alias) else target_select_expr
+            if _is_sequence_like_expression(value_expr):
+                return None
+        expression_table_aliases: Set[str] = set()
+        if target_select_expr is not None:
+            inspect_expr = target_select_expr.this if isinstance(target_select_expr, sqlglot.exp.Alias) else target_select_expr
+            for col_expr in inspect_expr.find_all(sqlglot.exp.Column):
+                alias_candidate = getattr(col_expr.table, "name", None) or getattr(col_expr.table, "this", None)
+                if alias_candidate is None and isinstance(col_expr.table, sqlglot.exp.Identifier):
+                    alias_candidate = col_expr.table.name
+                elif isinstance(col_expr.table, str):
+                    alias_candidate = col_expr.table
+                if alias_candidate:
+                    expression_table_aliases.add(alias_candidate.upper())
+        for col in scope.columns:
+            col_identifier = getattr(col.this, "name", None)
+            col_name = col_identifier or getattr(col, "name", None)
+            if col_name and col_name.upper() == column_name.upper():
+                table_alias = getattr(col.table, "name", None) or getattr(col.table, "this", None)
+                if table_alias is None and isinstance(col.table, sqlglot.exp.Identifier):
+                    table_alias = col.table.name
+                elif isinstance(col.table, str):
+                    table_alias = col.table
+                upper_alias = table_alias.upper() if isinstance(table_alias, str) else None
+                if expression_table_aliases and upper_alias and upper_alias not in expression_table_aliases:
+                    continue
+                if table_alias:
+                    alias_resolution_attempted = True
+                    resolved = _resolve_alias_to_table(
+                        str(table_alias),
+                        col_identifier or column_name,
+                        alias_map,
+                        cte_map,
+                        seen,
+                    )
+                    if resolved:
+                        return resolved
+        if target_select_expr is None:
+            for expr in select_expressions:
+                alias_name = expr.alias_or_name
+                if alias_name and alias_name.upper() == column_name.upper():
+                    target_select_expr = expr
+                    break
+        if target_select_expr is not None:
+            inspect_expr = target_select_expr.this if isinstance(target_select_expr, sqlglot.exp.Alias) else target_select_expr
+            contains_column = isinstance(inspect_expr, sqlglot.exp.Column)
+            if not contains_column:
+                contains_column = any(True for _ in inspect_expr.find_all(sqlglot.exp.Column))
+            if not contains_column:
+                return None
+        if alias_resolution_attempted:
+            return None
+        # If not found via direct column match, attempt to inspect sources
+        sources = getattr(scope, "sources", {})
+        for source_alias, table_expr in sources.items():
+            try:
+                source_columns = scope.source_columns(source_alias)
+            except TypeError:
+                source_columns = []
+            for col in source_columns or []:
+                src_identifier = getattr(col.this, "name", None)
+                src_name = src_identifier or getattr(col, "name", None)
+                if src_name and src_name.upper() == column_name.upper():
+                    if isinstance(table_expr, sqlglot.exp.Table):
+                        table_ref = _TableName.from_sqlglot_table(table_expr)
+                        resolved = _resolve_table_ref(table_ref, src_name)
+                        if resolved:
+                            return resolved
+        # Fallback to first physical table source when no column match was found
+        for _, table_expr in sources.items():
+            if isinstance(table_expr, sqlglot.exp.Table):
+                table_ref = _TableName.from_sqlglot_table(table_expr)
+                resolved = _resolve_table_ref(table_ref, column_name)
+                if resolved:
+                    return resolved
+
+    return None
+
+
 def _select_statement_cll(
     statement: _SupportedColumnLineageTypes,
     dialect: sqlglot.Dialect,
@@ -455,6 +710,8 @@ def _select_statement_cll(
     default_schema: Optional[str] = None,
 ) -> List[_ColumnLineageInfo]:
     column_lineage: List[_ColumnLineageInfo] = []
+
+    alias_table_mapping, cte_scope_mapping = _build_alias_resolution_maps(root_scope)
 
     try:
         output_columns = [
@@ -479,7 +736,16 @@ def _select_statement_cll(
                 dialect,
                 default_db,
                 default_schema,
+                alias_table_mapping=alias_table_mapping,
+                cte_scope_mapping=cte_scope_mapping,
             )
+            fallback_upstreams = _derive_upstreams_via_alias_walk(
+                lineage_node,
+                alias_table_mapping,
+                cte_scope_mapping,
+            )
+            if fallback_upstreams and not direct_raw_col_upstreams:
+                direct_raw_col_upstreams = fallback_upstreams
 
             original_col_expression = lineage_node.expression
             if output_col.startswith("_col_"):
@@ -502,6 +768,20 @@ def _select_statement_cll(
                 )
                 for edge in direct_raw_col_upstreams
             }
+
+            value_expr = (
+                original_col_expression.this
+                if isinstance(original_col_expression, sqlglot.exp.Alias)
+                else original_col_expression
+            )
+            if _is_sequence_like_expression(value_expr):
+                direct_resolved_col_upstreams = {
+                    edge
+                    for edge in direct_resolved_col_upstreams
+                    if edge.column
+                    and "SEQUENCE" not in edge.column.upper()
+                    and edge.column.upper() not in {"NEXTVAL", "CURRVAL"}
+                }
 
             if not direct_resolved_col_upstreams:
                 logger.debug(f'  "{output_col}" has no upstreams')
@@ -615,14 +895,38 @@ def _get_direct_raw_col_upstreams(
     dialect: Optional[sqlglot.Dialect] = None,
     default_db: Optional[str] = None,
     default_schema: Optional[str] = None,
+    *,
+    alias_table_mapping: Optional[Dict[str, _TableName]] = None,
+    cte_scope_mapping: Optional[Dict[str, sqlglot.optimizer.Scope]] = None,
 ) -> OrderedSet[_ColumnRef]:
     direct_raw_col_upstreams: OrderedSet[_ColumnRef] = OrderedSet()
+    sequence_like_columns: Set[Tuple[str, str]] = set()
 
     for node in lineage_node.walk():
-        if node.downstream:
-            pass
+        expression = node.expression
 
-        elif isinstance(node.expression, sqlglot.exp.Table):
+        if isinstance(expression, sqlglot.exp.Alias):
+            value_expr = expression.this
+            if _is_sequence_like_expression(value_expr):
+                for col_expr in value_expr.walk():
+                    if not isinstance(col_expr, sqlglot.exp.Column):
+                        continue
+                    table_alias_obj = col_expr.table
+                    if isinstance(table_alias_obj, sqlglot.exp.Identifier):
+                        table_alias = table_alias_obj.name
+                    elif isinstance(table_alias_obj, str):
+                        table_alias = table_alias_obj
+                    else:
+                        table_alias = getattr(table_alias_obj, "name", None) or getattr(table_alias_obj, "this", None)
+                    column_name = col_expr.name
+                    if table_alias and column_name:
+                        sequence_like_columns.add((table_alias.upper(), column_name.upper()))
+            continue
+
+        if node.downstream:
+            continue
+
+        if isinstance(expression, sqlglot.exp.Table):
             table_ref = _TableName.from_sqlglot_table(node.expression)
 
             if node.name == "*":
@@ -631,6 +935,80 @@ def _get_direct_raw_col_upstreams(
             normalized_col = sqlglot.parse_one(node.name).this.name
             if hasattr(node, "subfield") and node.subfield:
                 normalized_col = f"{normalized_col}.{node.subfield}"
+
+            table_alias_key = node.expression.alias_or_name or table_ref.table
+            if table_alias_key and (
+                table_alias_key.upper(),
+                normalized_col.upper(),
+            ) in sequence_like_columns:
+                continue
+
+            pivots = node.expression.args.get("pivots") or []
+            handled_unpivot = False
+            if pivots:
+                table_alias = table_ref.table or node.expression.alias_or_name
+                for pivot in pivots:
+                    if not getattr(pivot, "args", None):
+                        continue
+                    if not pivot.args.get("unpivot"):
+                        continue
+                    output_columns = [
+                        expr.name
+                        for expr in (pivot.args.get("expressions") or [])
+                        if isinstance(expr, sqlglot.exp.Column) and expr.name
+                    ]
+                    if not any(
+                        output.upper() == normalized_col.upper()
+                        for output in output_columns
+                    ):
+                        continue
+                    handled_unpivot = True
+                    fields = pivot.args.get("fields") or []
+                    for field in fields:
+                        input_expressions = getattr(field, "expressions", []) or []
+                        for input_expr in input_expressions:
+                            if (
+                                isinstance(input_expr, sqlglot.exp.Column)
+                                and input_expr.name
+                                and table_alias
+                            ):
+                                resolved = _resolve_alias_to_table(
+                                    table_alias,
+                                    input_expr.name,
+                                    alias_table_mapping,
+                                    cte_scope_mapping,
+                                )
+                                if resolved:
+                                    resolved_table, resolved_column = resolved
+                                    direct_raw_col_upstreams.add(
+                                        _ColumnRef(
+                                            table=resolved_table,
+                                            column=resolved_column,
+                                        )
+                                    )
+            if handled_unpivot:
+                continue
+
+            table_alias = table_ref.table
+            if table_alias and (
+                (cte_scope_mapping and table_alias.upper() in cte_scope_mapping)
+                or (alias_table_mapping and table_alias.upper() in alias_table_mapping)
+            ):
+                resolved = _resolve_alias_to_table(
+                    table_alias,
+                    normalized_col,
+                    alias_table_mapping,
+                    cte_scope_mapping,
+                )
+                if resolved:
+                    resolved_table, resolved_column = resolved
+                    direct_raw_col_upstreams.add(
+                        _ColumnRef(
+                            table=resolved_table,
+                            column=resolved_column,
+                        )
+                    )
+                    continue
 
             direct_raw_col_upstreams.add(
                 _ColumnRef(table=table_ref, column=normalized_col)
@@ -667,6 +1045,31 @@ def _get_direct_raw_col_upstreams(
                     f"Failed to parse placeholder column expression: {node.name} with dialect {dialect}. The exception was: {e}",
                     exc_info=True,
                 )
+        elif isinstance(node.expression, sqlglot.exp.Alias):
+            column_expr = node.expression.this
+            if isinstance(column_expr, sqlglot.exp.Column):
+                column_name = column_expr.name
+                table_alias = getattr(column_expr.table, "name", None)
+                if table_alias is None:
+                    if isinstance(column_expr.table, sqlglot.exp.Identifier):
+                        table_alias = column_expr.table.name
+                    elif isinstance(column_expr.table, str):
+                        table_alias = column_expr.table
+                if column_name and table_alias:
+                    resolved = _resolve_alias_to_table(
+                        str(table_alias),
+                        column_name,
+                        alias_table_mapping,
+                        cte_scope_mapping,
+                    )
+                    if resolved:
+                        resolved_table, resolved_column = resolved
+                        direct_raw_col_upstreams.add(
+                            _ColumnRef(
+                                table=resolved_table,
+                                column=resolved_column,
+                            )
+                        )
         else:
             pass
 
@@ -1192,7 +1595,7 @@ def _translate_internal_column_lineage(
 ) -> ColumnLineageInfo:
     downstream_urn = None
     if raw_column_lineage.downstream.table:
-        downstream_urn = table_name_urn_mapping[raw_column_lineage.downstream.table]
+        downstream_urn = table_name_urn_mapping.get(raw_column_lineage.downstream.table)
     return ColumnLineageInfo(
         downstream=DownstreamColumnRef(
             table=downstream_urn,
@@ -1210,6 +1613,7 @@ def _translate_internal_column_lineage(
                 column=upstream.column,
             )
             for upstream in raw_column_lineage.upstreams
+            if upstream.table in table_name_urn_mapping
         ],
         logic=raw_column_lineage.logic,
     )
