@@ -8,16 +8,17 @@
 from fastapi import APIRouter, HTTPException, Depends, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from typing import List
+from typing import List, Dict
 from pydantic import BaseModel
 from app.database import get_db
 from app.utils.models import Organization, User
 from app.utils.auth_deps import get_current_user
-from app.utils.rbac import require_organizations_endpoint_access, check_organization_access
+from app.utils.rbac import require_organizations_endpoint_access, check_organization_access, PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, ORGANIZATION_ADMIN, MEMBER
 import uuid
 from uuid import UUID
 from datetime import datetime
 import logging
+from collections import Counter
 
 router = APIRouter(prefix="/organizations", tags=["Organizations"])
 logger = logging.getLogger("organizations")
@@ -40,6 +41,34 @@ class OrganizationResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class UserKPIInfo(BaseModel):
+    id: UUID
+    username: str
+    email: str
+    role: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class RoleCounts(BaseModel):
+    PRODUCT_SUPPORT_ADMIN: int = 0
+    SYSTEM_ADMIN: int = 0
+    ORGANIZATION_ADMIN: int = 0
+    MEMBER: int = 0
+    total: int = 0
+
+class OrganizationKPI(BaseModel):
+    organization: OrganizationResponse
+    users: List[UserKPIInfo]
+    role_counts: RoleCounts
+
+class KPIMetadata(BaseModel):
+    total_organizations: int
+    total_users: int
+    organizations: List[OrganizationKPI]
 
 
 # --- Endpoints ---
@@ -81,6 +110,88 @@ def list_organizations(
     organizations = db.query(Organization).all()
     logger.debug("/organizations - list count=%d", len(organizations))
     return organizations
+
+
+@router.get("/kpi", response_model=KPIMetadata)
+def get_organizations_kpi(
+    current_user: User = Depends(require_organizations_endpoint_access()),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """
+    Get KPI data for all organizations with users and role counts.
+    Returns all organizations with their respective users and KPI metadata.
+    (PRODUCT_SUPPORT_ADMIN only)
+    """
+    logger.info("/organizations/kpi - request by user_id=%s", current_user.id)
+    
+    # Get all organizations
+    organizations = db.query(Organization).order_by(Organization.created_at).all()
+    
+    # Get all users with their organizations
+    users = db.query(User).order_by(User.created_at).all()
+    
+    # Group users by organization
+    users_by_org: Dict[UUID, List[User]] = {}
+    for user in users:
+        if user.org_id not in users_by_org:
+            users_by_org[user.org_id] = []
+        users_by_org[user.org_id].append(user)
+    
+    # Build response
+    organization_kpis = []
+    total_users_count = 0
+    
+    for org in organizations:
+        org_users = users_by_org.get(org.id, [])
+        total_users_count += len(org_users)
+        
+        # Count roles
+        role_counter = Counter(user.role for user in org_users)
+        
+        role_counts = RoleCounts(
+            PRODUCT_SUPPORT_ADMIN=role_counter.get(PRODUCT_SUPPORT_ADMIN, 0),
+            SYSTEM_ADMIN=role_counter.get(SYSTEM_ADMIN, 0),
+            ORGANIZATION_ADMIN=role_counter.get(ORGANIZATION_ADMIN, 0),
+            MEMBER=role_counter.get(MEMBER, 0),
+            total=len(org_users)
+        )
+        
+        # Convert users to response format
+        user_kpi_info = [
+            UserKPIInfo(
+                id=user.id,
+                username=user.username,
+                email=user.email,
+                role=user.role,
+                is_active=user.is_active,
+                created_at=user.created_at
+            )
+            for user in org_users
+        ]
+        
+        organization_kpis.append(
+            OrganizationKPI(
+                organization=OrganizationResponse(
+                    id=org.id,
+                    name=org.name,
+                    is_active=org.is_active,
+                    created_at=org.created_at,
+                    updated_at=org.updated_at
+                ),
+                users=user_kpi_info,
+                role_counts=role_counts
+            )
+        )
+    
+    logger.info("/organizations/kpi - returning %d organizations with %d total users", 
+                len(organizations), total_users_count)
+    
+    return KPIMetadata(
+        total_organizations=len(organizations),
+        total_users=total_users_count,
+        organizations=organization_kpis
+    )
 
 
 @router.get("/{org_id}", response_model=OrganizationResponse)
