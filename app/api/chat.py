@@ -302,26 +302,53 @@ async def websocket_chat_endpoint(
     org_id: str, 
     user_id: str,
     session_id: Optional[str] = Query(None),
-    user_name: Optional[str] = Query(None)
+    user_name: Optional[str] = Query(None),
+    token: Optional[str] = Query(None)  # Authentication token
 ):
     """
     WebSocket endpoint for real-time chat functionality.
     
     Args:
         websocket: WebSocket connection
-        org_id: Organization ID
-        user_id: User ID
+        org_id: Organization ID (can be overridden by authenticated user's org_id)
+        user_id: User ID (should match authenticated user)
         session_id: Optional session ID (will generate if not provided)
         user_name: Optional user display name
+        token: JWT authentication token (required for authenticated access)
+    
+    Note: If token is provided, user will be authenticated and org_id will be resolved from user.
+          If token is not provided, connection will work but with limited functionality.
     """
     if not session_id:
         session_id = str(uuid.uuid4())
     
     logger.info(f"WebSocket connection attempt for org {org_id}, user {user_id}, session {session_id}")
     
+    # Authenticate user if token is provided
+    current_user = None
+    resolved_org_id = org_id
+    
+    if token:
+        try:
+            from app.database import SessionLocal
+            from app.utils.auth_deps import get_user_from_token
+            db = SessionLocal()
+            try:
+                current_user = get_user_from_token(token, db)
+                resolved_org_id = str(current_user.org_id)
+                user_id = str(current_user.id)  # Use authenticated user's ID
+                user_name = user_name or current_user.username
+                logger.info(f"WebSocket authenticated: user_id={user_id}, org_id={resolved_org_id}")
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning(f"WebSocket authentication failed: {str(e)}")
+            await websocket.close(code=4001, reason="Authentication failed")
+            return
+    
     try:
-        # Connect to WebSocket manager
-        session = await websocket_manager.connect(websocket, session_id, org_id, user_id)
+        # Connect to WebSocket manager (use resolved org_id)
+        session = await websocket_manager.connect(websocket, session_id, resolved_org_id, user_id)
         
         # Send welcome message
         welcome_message = WebSocketMessage(
@@ -333,7 +360,7 @@ async def websocket_chat_endpoint(
                 "status": "connected"
             },
             sender_id="system",
-            room_id=org_id
+            room_id=resolved_org_id
         )
         await websocket_manager.send_message(session_id, welcome_message)
         
@@ -348,9 +375,9 @@ async def websocket_chat_endpoint(
                 "action": "joined"
             },
             sender_id=user_id,
-            room_id=org_id
+            room_id=resolved_org_id
         )
-        await websocket_manager.broadcast_to_org(org_id, user_join_message, exclude_session=session_id)
+        await websocket_manager.broadcast_to_org(resolved_org_id, user_join_message, exclude_session=session_id)
         
         # Main message loop
         while True:
@@ -365,9 +392,9 @@ async def websocket_chat_endpoint(
                 message_type = message_data.get("type", MessageType.CHAT_MESSAGE)
                 
                 if message_type == MessageType.CHAT_MESSAGE:
-                    await handle_chat_message(session_id, org_id, user_id, user_name, message_data)
+                    await handle_chat_message(session_id, resolved_org_id, user_id, user_name, message_data, current_user)
                 elif message_type == MessageType.TYPING_INDICATOR:
-                    await handle_typing_indicator(session_id, org_id, user_id, user_name, message_data)
+                    await handle_typing_indicator(session_id, resolved_org_id, user_id, user_name, message_data)
                 elif message_type == "ping":
                     await handle_ping(session_id)
                 else:
@@ -416,20 +443,40 @@ async def websocket_chat_endpoint(
                 "action": "left"
             },
             sender_id=user_id,
-            room_id=org_id
+            room_id=resolved_org_id
         )
-        await websocket_manager.broadcast_to_org(org_id, user_leave_message)
+        await websocket_manager.broadcast_to_org(resolved_org_id, user_leave_message)
         
         logger.info(f"WebSocket cleanup completed for session {session_id}")
 
-async def handle_chat_message(session_id: str, org_id: str, user_id: str, user_name: Optional[str], message_data: dict):
-    """Handle incoming chat messages and generate AI responses"""
+async def handle_chat_message(
+    session_id: str, 
+    org_id: str, 
+    user_id: str, 
+    user_name: Optional[str], 
+    message_data: dict,
+    current_user: Optional[User] = None
+):
+    """
+    Handle incoming chat messages and generate AI responses using the full chat logic.
+    This integrates the sophisticated chat endpoint logic (LLM agents, tools, classification) 
+    with WebSocket real-time communication.
+    
+    Args:
+        session_id: WebSocket session ID
+        org_id: Organization ID (resolved from authenticated user if available)
+        user_id: User ID
+        user_name: User display name
+        message_data: Message data from client
+        current_user: Authenticated user object (if available)
+    """
     try:
         content = message_data.get("content", "").strip()
         if not content:
             return
             
         conversation_id = message_data.get("conversation_id")
+        k = message_data.get("k", 5)  # Number of documents to retrieve
         
         # Echo the user message to all users in the organization
         user_message = WebSocketMessage(
@@ -459,52 +506,231 @@ async def handle_chat_message(session_id: str, org_id: str, user_id: str, user_n
         )
         await websocket_manager.broadcast_to_org(org_id, ai_typing)
         
-        # Process with AI
+        # Process with AI using the full chat logic
         start_time = datetime.utcnow()
         try:
-            qa_chain = get_qa_chain(org_id, k=5)
-            result = qa_chain.invoke({"query": content})
-            
-            response_text = result.get("result", "I'm sorry, I couldn't generate a response.")
-            source_documents = result.get("source_documents", [])
-            
-            # Format source documents
-            sources = []
-            for doc in source_documents:
-                source_info = {
-                    "content": doc.page_content,
-                    "metadata": doc.metadata
-                }
-                sources.append(source_info)
-            
-            processing_time = (datetime.utcnow() - start_time).total_seconds()
-            
-            # Send AI response
-            ai_response = WebSocketMessage(
-                type="ai_response",
-                data={
-                    "response": response_text,
-                    "sources": sources,
-                    "processing_time": processing_time,
-                    "conversation_id": conversation_id,
-                    "sender_id": "ai_assistant",
-                    "sender_name": "QueryGuard AI",
-                    "message_type": "assistant"
-                },
-                sender_id="ai_assistant",
-                room_id=org_id
-            )
-            await websocket_manager.broadcast_to_org(org_id, ai_response)
+            # Check if we have authenticated user (required for full functionality)
+            if not current_user:
+                # Fallback to simple QA chain if no authentication
+                logger.warning(f"No authenticated user for WebSocket chat, using simple QA chain")
+                qa_chain = get_qa_chain(org_id, k=k)
+                result = qa_chain.invoke({"query": content})
+                
+                response_text = result.get("result", "I'm sorry, I couldn't generate a response.")
+                source_documents = result.get("source_documents", [])
+                
+                # Format source documents
+                sources = []
+                for doc in source_documents:
+                    source_info = {
+                        "content": doc.page_content,
+                        "metadata": doc.metadata
+                    }
+                    sources.append(source_info)
+                
+                processing_time = (datetime.utcnow() - start_time).total_seconds()
+                
+                # Send AI response
+                ai_response = WebSocketMessage(
+                    type="ai_response",
+                    data={
+                        "response": response_text,
+                        "sources": sources,
+                        "processing_time": processing_time,
+                        "conversation_id": conversation_id,
+                        "sender_id": "ai_assistant",
+                        "sender_name": "QueryGuard AI",
+                        "message_type": "assistant"
+                    },
+                    sender_id="ai_assistant",
+                    room_id=org_id
+                )
+                await websocket_manager.broadcast_to_org(org_id, ai_response)
+            else:
+                # Use full chat logic with agents and tools
+                # Resolve organization strictly from authenticated user
+                resolved_org_id = str(current_user.org_id)
+                
+                # Prepare the query with conversation context if provided
+                query = content
+                conversation_history = message_data.get("conversation_history", [])
+                if conversation_history:
+                    context_messages = [f"{msg.get('role', 'user')}: {msg.get('content', '')}" for msg in conversation_history[-5:]]
+                    if context_messages:
+                        context = "\n".join(context_messages)
+                        query = f"Previous conversation context:\n{context}\n\nCurrent question: {content}"
+                
+                # LLM classification: decide whether to use tools (lineage/impact) or respond conversationally (other)
+                classify_prompt = (
+                    "You are a classifier. Decide if the user's message requires using specialized tools for: "
+                    "data lineage (extract_lineage), query impact analysis (query_history_search), "
+                    "PR/Repo analysis (pr_repo_analysis), code suggestions (code_suggestion), or Jira ticket creation (create_jira_ticket).\n"
+                    "Respond with exactly one word: lineage, impact, pr, code, jira, or other.\n\n"
+                    f"Message: {content}"
+                )
+                if not CHAT_LLM:
+                    raise Exception("OpenAI API key not configured for chatbot")
+                    
+                classification = CHAT_LLM.invoke(classify_prompt)
+                classification_label = (getattr(classification, "content", str(classification)) or "other").strip().lower()
+
+                if classification_label not in {"lineage", "impact", "pr", "code", "jira"}:
+                    # Conversational reply without tools
+                    persona_prompt = (
+                        "SYSTEM: You are Zane AI, a helpful assistant for data lineage and change-impact analysis.\n"
+                        "- Be concise.\n"
+                        "- Do NOT invent lineage or impacts without analysis.\n"
+                        "- If the user hasn't asked for lineage/impact, introduce capabilities briefly and ask a clarifying question.\n\n"
+                        f"USER: {content}\n"
+                        "ASSISTANT:"
+                    )
+                    llm_reply = CHAT_LLM.invoke(persona_prompt)
+                    reply_text = getattr(llm_reply, "content", str(llm_reply))
+                    
+                    processing_time = (datetime.utcnow() - start_time).total_seconds()
+                    
+                    ai_response = WebSocketMessage(
+                        type="ai_response",
+                        data={
+                            "response": reply_text,
+                            "sources": [],
+                            "processing_time": processing_time,
+                            "conversation_id": conversation_id,
+                            "impacted_query_ids": [],
+                            "impacted_queries": [],
+                            "pr_repo_data": None,
+                            "code_suggestions": None,
+                            "jira_ticket": None,
+                            "sender_id": "ai_assistant",
+                            "sender_name": "QueryGuard AI",
+                            "message_type": "assistant"
+                        },
+                        sender_id="ai_assistant",
+                        room_id=org_id
+                    )
+                    await websocket_manager.broadcast_to_org(org_id, ai_response)
+                else:
+                    # Build org-aware tools and delegate tool selection to the LLM agent
+                    lineage_tool = build_org_lineage_tool(org_id=resolved_org_id, k=k)
+                    query_history_tool = build_org_query_history_tool(org_id=resolved_org_id, max_iters=5)
+                    pr_repo_tool = build_org_pr_repo_tool(org_id=resolved_org_id, default_limit=10)
+                    code_suggestion_tool = build_org_code_suggestion_tool(org_id=resolved_org_id)
+                    jira_tool = build_org_jira_tool(org_id=resolved_org_id, user_id=str(current_user.id))
+
+                    agent = initialize_agent(
+                        tools=[lineage_tool, query_history_tool, pr_repo_tool, code_suggestion_tool, jira_tool],
+                        llm=CHAT_LLM,
+                        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+                        verbose=True,
+                    )
+
+                    # Strong guidance to the agent on tool selection and output format
+                    guidance = (
+                        "SYSTEM ROLE: You are Zane AI, an assistant that helps analyze data lineage and change impacts.\n"
+                        "BEHAVIOR:\n"
+                        "- Be concise and helpful.\n"
+                        "- If the user greets you (e.g., 'hi', 'hello'), respond with a short intro of who you are and how you can help (lineage Q&A, query impact analysis, PR analysis, code suggestions, and Jira ticket creation).\n"
+                        "- If the question is about schema/column changes or 'impacted queries', you MUST use the query_history_search tool.\n"
+                        "- When reporting impacted queries, return a concise, numbered list with a short SQL preview for each query, not just IDs.\n"
+                        "- If it's a pure lineage question, use the extract_lineage tool.\n"
+                        "- If the question is about PR analysis or repository information, use the pr_repo_analysis tool.\n"
+                        "- If the question asks for code suggestions, fixes, or changes needed based on PR analysis, use the code_suggestion tool.\n"
+                        "- If the question asks to create a Jira ticket, use the create_jira_ticket tool.\n"
+                    )
+                    # Nudge the agent to preferred tool if classification is specific
+                    preferred_hint = (
+                        "\nPREFERRED_TOOL: query_history_search\n" if classification_label == "impact" else (
+                            "\nPREFERRED_TOOL: extract_lineage\n" if classification_label == "lineage" else (
+                                "\nPREFERRED_TOOL: pr_repo_analysis\n" if classification_label == "pr" else (
+                                    "\nPREFERRED_TOOL: code_suggestion\n" if classification_label == "code" else (
+                                        "\nPREFERRED_TOOL: create_jira_ticket\n" if classification_label == "jira" else ""
+                                    )
+                                )
+                            )
+                        )
+                    )
+                    agent_query = f"{guidance}{preferred_hint}\nUser question: {query}"
+
+                    agent_result = agent.invoke(agent_query)
+                    # LangChain agents often return dicts with `output`; fallback to str
+                    if isinstance(agent_result, dict) and "output" in agent_result:
+                        response_text = agent_result.get("output", "")
+                    else:
+                        response_text = str(agent_result)
+
+                    # Best-effort: extract query IDs from the response text and fetch full queries
+                    impacted_query_ids: List[str] = []
+                    impacted_queries: List[Dict[str, Any]] = []
+                    try:
+                        import re as _re
+                        # Match UUID-like ids commonly used in results
+                        impacted_query_ids = list(dict.fromkeys(_re.findall(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", response_text, flags=_re.I)))
+                        if impacted_query_ids:
+                            impacted_queries = fetch_queries(impacted_query_ids) or []
+                    except Exception:
+                        impacted_query_ids = []
+                        impacted_queries = []
+
+                    # Best-effort: extract tool payloads if present (DATA:\n{...})
+                    pr_repo_data: Optional[Dict[str, Any]] = None
+                    code_suggestions: Optional[Dict[str, Any]] = None
+                    jira_ticket: Optional[Dict[str, Any]] = None
+                    try:
+                        import re as _re2, json as _json2
+                        m = _re2.search(r"DATA:\n(\{[\s\S]*\})", response_text)
+                        if m:
+                            data = _json2.loads(m.group(1))
+                            # Check what type of data it is
+                            if "suggestions_by_file" in data:
+                                code_suggestions = data
+                            elif "ticket" in data or "jira_issue" in data:
+                                jira_ticket = data
+                            else:
+                                pr_repo_data = data
+                    except Exception:
+                        pass
+                    
+                    processing_time = (datetime.utcnow() - start_time).total_seconds()
+                    
+                    # Send AI response with all data
+                    ai_response = WebSocketMessage(
+                        type="ai_response",
+                        data={
+                            "response": response_text,
+                            "sources": [],  # Tool outputs include their own context
+                            "processing_time": processing_time,
+                            "conversation_id": conversation_id,
+                            "impacted_query_ids": impacted_query_ids,
+                            "impacted_queries": impacted_queries,
+                            "pr_repo_data": pr_repo_data,
+                            "code_suggestions": code_suggestions,
+                            "jira_ticket": jira_ticket,
+                            "sender_id": "ai_assistant",
+                            "sender_name": "QueryGuard AI",
+                            "message_type": "assistant"
+                        },
+                        sender_id="ai_assistant",
+                        room_id=org_id
+                    )
+                    await websocket_manager.broadcast_to_org(org_id, ai_response)
             
         except Exception as e:
             logger.error(f"Error generating AI response: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             error_response = WebSocketMessage(
                 type="ai_response",
                 data={
                     "response": "I apologize, but I encountered an error while processing your request. Please try again.",
                     "sources": [],
                     "error": str(e),
+                    "processing_time": (datetime.utcnow() - start_time).total_seconds(),
                     "conversation_id": conversation_id,
+                    "impacted_query_ids": [],
+                    "impacted_queries": [],
+                    "pr_repo_data": None,
+                    "code_suggestions": None,
+                    "jira_ticket": None,
                     "sender_id": "ai_assistant",
                     "sender_name": "QueryGuard AI",
                     "message_type": "assistant"
@@ -529,6 +755,8 @@ async def handle_chat_message(session_id: str, org_id: str, user_id: str, user_n
             
     except Exception as e:
         logger.error(f"Error handling chat message: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 async def handle_typing_indicator(session_id: str, org_id: str, user_id: str, user_name: Optional[str], message_data: dict):
     """Handle typing indicator messages"""
@@ -666,8 +894,13 @@ async def get_websocket_test_page():
                 <input type="text" id="orgId" placeholder="Organization ID" value="76d33fb3-6062-456b-a211-4aec9971f8be">
                 <input type="text" id="userId" placeholder="User ID" value="test-user">
                 <input type="text" id="userName" placeholder="User Name" value="Test User">
+                <input type="text" id="token" placeholder="JWT Token (optional, for full features)" style="width: 300px;">
                 <button onclick="connect()">Connect</button>
                 <button onclick="disconnect()">Disconnect</button>
+            </div>
+            <div style="margin: 10px 0; font-size: 12px; color: #666;">
+                <strong>Note:</strong> Without token = Simple QA mode. With token = Full features (agents, tools, impact analysis, etc.)
+                <br>Get token from: <code>POST /auth/login</code>
             </div>
             
             <div class="status" id="status">Disconnected</div>
@@ -690,6 +923,7 @@ async def get_websocket_test_page():
                 const orgId = document.getElementById('orgId').value;
                 const userId = document.getElementById('userId').value;
                 const userName = document.getElementById('userName').value;
+                const token = document.getElementById('token').value.trim();
                 
                 if (!orgId || !userId) {
                     alert('Please enter Organization ID and User ID');
@@ -697,7 +931,12 @@ async def get_websocket_test_page():
                 }
                 
                 sessionId = 'test-session-' + Math.random().toString(36).substr(2, 9);
-                const wsUrl = `ws://localhost:8000/chat/ws/${orgId}/${userId}?session_id=${sessionId}&user_name=${encodeURIComponent(userName)}`;
+                let wsUrl = `ws://localhost:8000/chat/ws/${orgId}/${userId}?session_id=${sessionId}&user_name=${encodeURIComponent(userName)}`;
+                
+                // Add token if provided (for full features)
+                if (token) {
+                    wsUrl += `&token=${encodeURIComponent(token)}`;
+                }
                 
                 ws = new WebSocket(wsUrl);
                 
@@ -763,7 +1002,26 @@ async def get_websocket_test_page():
                         addMessage(senderName, data.data.content, 'user');
                         break;
                     case 'ai_response':
-                        addMessage('QueryGuard AI', data.data.response, 'ai');
+                        let aiText = data.data.response;
+                        // Show additional data if available
+                        if (data.data.impacted_queries && data.data.impacted_queries.length > 0) {
+                            aiText += '\\n\\n[Impacted Queries: ' + data.data.impacted_queries.length + ' found]';
+                        }
+                        if (data.data.pr_repo_data) {
+                            aiText += '\\n[PR/Repo data available]';
+                        }
+                        if (data.data.code_suggestions) {
+                            aiText += '\\n[Code suggestions available]';
+                        }
+                        if (data.data.jira_ticket) {
+                            aiText += '\\n[Jira ticket created]';
+                        }
+                        if (data.data.processing_time) {
+                            aiText += '\\n(Processing time: ' + data.data.processing_time.toFixed(2) + 's)';
+                        }
+                        addMessage('QueryGuard AI', aiText, 'ai');
+                        // Log full response to console for debugging
+                        console.log('Full AI Response:', data.data);
                         break;
                     case 'system_message':
                         addMessage('System', data.data.message, 'system');

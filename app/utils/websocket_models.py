@@ -43,11 +43,20 @@ class ChatMessageResponse(BaseModel):
     metadata: Optional[Dict[str, Any]] = {}
 
 class AIResponseData(BaseModel):
-    """Model for AI response data"""
+    """Model for AI response data - matches ChatResponse structure"""
     response: str
     sources: List[Dict[str, Any]] = []
     confidence: Optional[float] = None
     processing_time: Optional[float] = None
+    conversation_id: Optional[str] = None
+    impacted_query_ids: Optional[List[str]] = []
+    impacted_queries: Optional[List[Dict[str, Any]]] = []
+    pr_repo_data: Optional[Dict[str, Any]] = None
+    code_suggestions: Optional[Dict[str, Any]] = None
+    jira_ticket: Optional[Dict[str, Any]] = None
+    sender_id: Optional[str] = "ai_assistant"
+    sender_name: Optional[str] = "QueryGuard AI"
+    message_type: Optional[str] = "assistant"
 
 class SystemMessageData(BaseModel):
     """Model for system message data"""
