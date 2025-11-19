@@ -9,16 +9,19 @@ from fastapi import APIRouter, HTTPException, Depends, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List, Dict
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from app.database import get_db
 from app.utils.models import Organization, User
 from app.utils.auth_deps import get_current_user
 from app.utils.rbac import require_organizations_endpoint_access, check_organization_access, PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, ORGANIZATION_ADMIN, MEMBER
+from app.api.auth import hash_password, generate_reset_token
+from app.utils.email_service import send_welcome_email, send_password_setup_email
 import uuid
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from collections import Counter
+import secrets
 
 router = APIRouter(prefix="/organizations", tags=["Organizations"])
 logger = logging.getLogger("organizations")
@@ -27,6 +30,8 @@ logger = logging.getLogger("organizations")
 # --- Models ---
 class OrganizationCreate(BaseModel):
     name: str
+    username: str  # Username for the first SYSTEM_ADMIN user
+    email: EmailStr  # Email for the first SYSTEM_ADMIN user
 
 class OrganizationUpdate(BaseModel):
     name: str | None = None
@@ -79,20 +84,74 @@ def create_organization(
     db: Session = Depends(get_db),
     request: Request = None
 ):
-    """Create a new organization (PRODUCT_SUPPORT_ADMIN only)"""
+    """
+    Create a new organization with first SYSTEM_ADMIN user (PRODUCT_SUPPORT_ADMIN only).
+    Automatically creates the first user with SYSTEM_ADMIN role using the provided username and email.
+    No password is required - a password setup link will be sent via email.
+    """
     # Check if organization name already exists
     existing_org = db.query(Organization).filter(Organization.name == org.name).first()
     if existing_org:
         logger.warning("/organizations - create: name exists %s", org.name)
         raise HTTPException(status_code=400, detail="Organization name already exists")
+    
+    # Check if username already exists
+    existing_user = db.query(User).filter(User.username == org.username).first()
+    if existing_user:
+        logger.warning("/organizations - create: username exists %s", org.username)
+        raise HTTPException(status_code=400, detail="Username already exists")
+    
+    # Check if email already exists
+    existing_email = db.query(User).filter(User.email == org.email).first()
+    if existing_email:
+        logger.warning("/organizations - create: email exists %s", org.email)
+        raise HTTPException(status_code=400, detail="Email already exists")
 
     new_org = Organization(name=org.name)
     
     try:
+        # Create organization first
         db.add(new_org)
-        db.commit()
-        db.refresh(new_org)
+        db.flush()  # Flush to get the org.id without committing
         logger.info("/organizations - created id=%s name=%s", new_org.id, new_org.name)
+        
+        # Generate reset token for first-time password setup
+        reset_token = generate_reset_token()
+        token_expires = datetime.utcnow() + timedelta(minutes=60)  # 60 minute expiry
+        
+        # Generate a temporary random password (user will set their own via reset link)
+        temp_password = secrets.token_urlsafe(32)
+        password_hash = hash_password(temp_password)
+        
+        # Create first user with SYSTEM_ADMIN role
+        first_user = User(
+            username=org.username,
+            email=org.email,
+            password_hash=password_hash,
+            org_id=new_org.id,
+            role=SYSTEM_ADMIN,
+            is_active=True,
+            password_reset_token=reset_token,
+            password_reset_token_expires=token_expires
+        )
+        
+        db.add(first_user)
+        db.commit()  # Commit both organization and user together
+        db.refresh(new_org)
+        db.refresh(first_user)
+        
+        # Send welcome email
+        welcome_email_sent = send_welcome_email(org.email, org.username)
+        if not welcome_email_sent:
+            logger.error("/organizations - create: failed to send welcome email to %s", org.email)
+        
+        # Send password setup email with reset link
+        setup_email_sent = send_password_setup_email(org.email, org.username, reset_token)
+        if not setup_email_sent:
+            logger.error("/organizations - create: failed to send password setup email to %s", org.email)
+        
+        logger.info("/organizations - created org id=%s name=%s with first SYSTEM_ADMIN user id=%s username=%s", 
+                   new_org.id, new_org.name, first_user.id, org.username)
         return new_org
     except IntegrityError:
         db.rollback()
