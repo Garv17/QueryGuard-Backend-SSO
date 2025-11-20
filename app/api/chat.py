@@ -804,15 +804,24 @@ async def websocket_chat_endpoint(
                 await websocket_manager.send_message(session_id, error_message)
             except Exception as e:
                 logger.error(f"Error processing message from session {session_id}: {str(e)}")
-                error_message = WebSocketMessage(
-                    type="error",
-                    data={
-                        "error_code": "PROCESSING_ERROR",
-                        "error_message": f"Error processing message: {str(e)}"
-                    },
-                    sender_id="system"
-                )
-                await websocket_manager.send_message(session_id, error_message)
+                # Only try to send error message if session is still connected
+                # Don't log error if connection is already closed (this is expected)
+                if session_id in websocket_manager.active_connections:
+                    try:
+                        error_message = WebSocketMessage(
+                            type="error",
+                            data={
+                                "error_code": "PROCESSING_ERROR",
+                                "error_message": f"Error processing message: {str(e)}"
+                            },
+                            sender_id="system"
+                        )
+                        await websocket_manager.send_message(session_id, error_message)
+                    except Exception as send_error:
+                        # If sending error message fails, connection is likely closed
+                        logger.debug(f"Could not send error message to session {session_id} (connection may be closed): {str(send_error)}")
+                else:
+                    logger.debug(f"Session {session_id} not in active connections, skipping error message")
                 
     except Exception as e:
         logger.error(f"WebSocket connection error for session {session_id}: {str(e)}")
