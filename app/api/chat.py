@@ -17,7 +17,8 @@ from app.utils.websocket_models import (
 )
 import json
 from app.api.auth import get_current_user
-from app.utils.models import User
+from app.utils.models import User, ChatThread, ChatMessage
+from app.database import get_db, SessionLocal
 from app.tools import build_org_lineage_tool, build_org_query_history_tool, build_org_pr_repo_tool, build_org_code_suggestion_tool, build_org_jira_tool
 from app.vector_db import CHAT_LLM
 from app.services.impact_analysis import fetch_queries
@@ -26,12 +27,99 @@ import uuid
 import asyncio
 from datetime import datetime
 from langchain.agents import initialize_agent, AgentType
+from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-class ChatMessage(BaseModel):
+# Helper functions for chat history
+def get_or_create_thread(thread_id: Optional[str], user_id: str, org_id: str, db: Session) -> ChatThread:
+    """
+    Get existing thread or create a new one if thread_id is None.
+    """
+    if thread_id:
+        try:
+            thread_uuid = uuid.UUID(thread_id)
+            thread = db.query(ChatThread).filter(
+                ChatThread.id == thread_uuid,
+                ChatThread.user_id == uuid.UUID(user_id),
+                ChatThread.org_id == uuid.UUID(org_id),
+                ChatThread.is_active == True
+            ).first()
+            if thread:
+                return thread
+        except ValueError:
+            pass
+    
+    # Create new thread
+    new_thread = ChatThread(
+        org_id=uuid.UUID(org_id),
+        user_id=uuid.UUID(user_id),
+        title="New Chat"
+    )
+    db.add(new_thread)
+    db.commit()
+    db.refresh(new_thread)
+    return new_thread
+
+def save_user_message(thread_id: str, user_id: str, org_id: str, content: str, db: Session) -> ChatMessage:
+    """Save a user message to the database."""
+    message = ChatMessage(
+        thread_id=uuid.UUID(thread_id),
+        org_id=uuid.UUID(org_id),
+        user_id=uuid.UUID(user_id),
+        role="user",
+        content=content
+    )
+    db.add(message)
+    
+    # Update thread's last_message_at
+    thread = db.query(ChatThread).filter(ChatThread.id == uuid.UUID(thread_id)).first()
+    if thread:
+        thread.last_message_at = datetime.utcnow()
+        # Auto-generate title from first message if title is still "New Chat"
+        if thread.title == "New Chat" and content:
+            # Generate title from first 50 chars of message
+            title = content[:50].strip()
+            if len(content) > 50:
+                title += "..."
+            thread.title = title
+    
+    db.commit()
+    db.refresh(message)
+    return message
+
+def save_assistant_message(
+    thread_id: str, 
+    user_id: str, 
+    org_id: str, 
+    content: str, 
+    metadata: Optional[Dict[str, Any]], 
+    db: Session
+) -> ChatMessage:
+    """Save an assistant message to the database."""
+    message = ChatMessage(
+        thread_id=uuid.UUID(thread_id),
+        org_id=uuid.UUID(org_id),
+        user_id=uuid.UUID(user_id),
+        role="assistant",
+        content=content,
+        message_metadata=metadata
+    )
+    db.add(message)
+    
+    # Update thread's last_message_at
+    thread = db.query(ChatThread).filter(ChatThread.id == uuid.UUID(thread_id)).first()
+    if thread:
+        thread.last_message_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(message)
+    return message
+
+class ChatMessageData(BaseModel):
     role: str  # "user" or "assistant"
     content: str
     timestamp: Optional[str] = None
@@ -39,7 +127,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     k: Optional[int] = 5  # Number of documents to retrieve for context
-    conversation_history: Optional[List[ChatMessage]] = []
+    conversation_history: Optional[List[ChatMessageData]] = []
 
 class ChatResponse(BaseModel):
     response: str
@@ -54,17 +142,26 @@ class ChatResponse(BaseModel):
 class ChatConversation(BaseModel):
     conversation_id: str
     org_id: str
-    messages: List[ChatMessage]
+    messages: List[ChatMessageData]
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
 @router.post("/query", response_model=ChatResponse)
-async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_current_user)):
+async def chat_with_llm(
+    request: ChatRequest, 
+    current_user: User = Depends(get_current_user),
+    thread_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
     """
     Chat with LLM using vector database context for a specific organization.
+    Optionally saves chat history if thread_id is provided.
     
     Args:
-        request: ChatRequest containing org_id, message, and optional parameters
+        request: ChatRequest containing message and optional parameters
+        thread_id: Optional thread ID for saving chat history (query parameter)
+        current_user: Authenticated user (from token)
+        db: Database session
         
     Returns:
         ChatResponse with LLM response and source documents
@@ -74,6 +171,17 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
         resolved_org_id = str(current_user.org_id)
 
         logger.info(f"Chat request for org_id: {resolved_org_id}, message: {request.message[:100]}...")
+        
+        # Get or create thread if thread_id provided
+        db_thread = None
+        if thread_id:
+            try:
+                db_thread = get_or_create_thread(thread_id, str(current_user.id), str(current_user.org_id), db)
+                thread_id = str(db_thread.id)
+                # Save user message
+                save_user_message(thread_id, str(current_user.id), str(current_user.org_id), request.message, db)
+            except Exception as e:
+                logger.error(f"Error saving user message: {str(e)}")
         
         # Prepare the query with conversation context if provided
         query = request.message
@@ -108,10 +216,25 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
             )
             llm_reply = CHAT_LLM.invoke(persona_prompt)
             reply_text = getattr(llm_reply, "content", str(llm_reply))
+            
+            # Save assistant message if thread_id provided
+            if thread_id:
+                try:
+                    save_assistant_message(
+                        thread_id,
+                        str(current_user.id),
+                        str(current_user.org_id),
+                        reply_text,
+                        {"processing_time": 0},
+                        db
+                    )
+                except Exception as e:
+                    logger.error(f"Error saving assistant message: {str(e)}")
+            
             return ChatResponse(
                 response=reply_text,
                 sources=[],
-                conversation_id=None,
+                conversation_id=thread_id,  # Return thread_id for compatibility
                 impacted_query_ids=[],
                 impacted_queries=[],
                 pr_repo_data=None,
@@ -199,10 +322,31 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
         except Exception:
             pass
         
+        # Save assistant message if thread_id provided
+        if thread_id:
+            try:
+                message_metadata = {
+                    "impacted_query_ids": impacted_query_ids,
+                    "impacted_queries": impacted_queries,
+                    "pr_repo_data": pr_repo_data,
+                    "code_suggestions": code_suggestions,
+                    "jira_ticket": jira_ticket,
+                }
+                save_assistant_message(
+                    thread_id,
+                    str(current_user.id),
+                    str(current_user.org_id),
+                    response_text,
+                    message_metadata,
+                    db
+                )
+            except Exception as e:
+                logger.error(f"Error saving assistant message: {str(e)}")
+        
         return ChatResponse(
             response=response_text,
             sources=[],  # Tool outputs include their own context; no structured source docs here
-            conversation_id=None,
+            conversation_id=thread_id,  # Return thread_id for compatibility
             impacted_query_ids=impacted_query_ids,
             impacted_queries=impacted_queries,
             pr_repo_data=pr_repo_data,
@@ -214,10 +358,251 @@ async def chat_with_llm(request: ChatRequest, current_user: User = Depends(get_c
         logger.error(f"Error in chat endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing chat request: {str(e)}")
 
+# Chat Thread Management Models
+class ChatThreadCreate(BaseModel):
+    title: Optional[str] = None
+
+class ChatThreadResponse(BaseModel):
+    id: str
+    org_id: str
+    user_id: str
+    title: Optional[str]
+    is_active: bool
+    created_at: str
+    updated_at: Optional[str]
+    last_message_at: Optional[str]
+    message_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+class ChatMessageResponse(BaseModel):
+    id: str
+    thread_id: str
+    role: str
+    content: str
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+class ChatThreadWithMessages(BaseModel):
+    id: str
+    org_id: str
+    user_id: str
+    title: Optional[str]
+    is_active: bool
+    created_at: str
+    updated_at: Optional[str]
+    last_message_at: Optional[str]
+    messages: List[ChatMessageResponse] = []
+
+    class Config:
+        from_attributes = True
+
+# Chat Thread Management Endpoints
+@router.post("/threads", response_model=ChatThreadResponse, status_code=201)
+async def create_chat_thread(
+    thread_data: ChatThreadCreate = ChatThreadCreate(),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a new chat thread for the authenticated user.
+    
+    Returns:
+        ChatThreadResponse with thread details
+    """
+    try:
+        new_thread = ChatThread(
+            org_id=current_user.org_id,
+            user_id=current_user.id,
+            title=thread_data.title or "New Chat"
+        )
+        db.add(new_thread)
+        db.commit()
+        db.refresh(new_thread)
+        
+        logger.info(f"Created chat thread {new_thread.id} for user {current_user.id}")
+        return ChatThreadResponse(
+            id=str(new_thread.id),
+            org_id=str(new_thread.org_id),
+            user_id=str(new_thread.user_id),
+            title=new_thread.title,
+            is_active=new_thread.is_active,
+            created_at=new_thread.created_at.isoformat(),
+            updated_at=new_thread.updated_at.isoformat() if new_thread.updated_at else None,
+            last_message_at=new_thread.last_message_at.isoformat() if new_thread.last_message_at else None,
+            message_count=0
+        )
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating chat thread: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error creating chat thread: {str(e)}")
+
+@router.get("/threads", response_model=List[ChatThreadResponse])
+async def get_user_chat_threads(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all chat threads for the authenticated user.
+    Returns threads ordered by last_message_at (most recent first).
+    """
+    try:
+        threads = db.query(ChatThread).filter(
+            ChatThread.user_id == current_user.id,
+            ChatThread.org_id == current_user.org_id,
+            ChatThread.is_active == True
+        ).order_by(desc(ChatThread.last_message_at), desc(ChatThread.created_at)).all()
+        
+        result = []
+        for thread in threads:
+            message_count = db.query(ChatMessage).filter(
+                ChatMessage.thread_id == thread.id
+            ).count()
+            
+            result.append(ChatThreadResponse(
+                id=str(thread.id),
+                org_id=str(thread.org_id),
+                user_id=str(thread.user_id),
+                title=thread.title,
+                is_active=thread.is_active,
+                created_at=thread.created_at.isoformat(),
+                updated_at=thread.updated_at.isoformat() if thread.updated_at else None,
+                last_message_at=thread.last_message_at.isoformat() if thread.last_message_at else None,
+                message_count=message_count
+            ))
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error getting chat threads: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting chat threads: {str(e)}")
+
+@router.get("/threads/{thread_id}", response_model=ChatThreadWithMessages)
+async def get_chat_thread(
+    thread_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get a specific chat thread with all its messages.
+    """
+    try:
+        thread_uuid = uuid.UUID(thread_id)
+        thread = db.query(ChatThread).filter(
+            ChatThread.id == thread_uuid,
+            ChatThread.user_id == current_user.id,
+            ChatThread.org_id == current_user.org_id,
+            ChatThread.is_active == True
+        ).first()
+        
+        if not thread:
+            raise HTTPException(status_code=404, detail="Chat thread not found")
+        
+        messages = db.query(ChatMessage).filter(
+            ChatMessage.thread_id == thread.id
+        ).order_by(ChatMessage.created_at).all()
+        
+        return ChatThreadWithMessages(
+            id=str(thread.id),
+            org_id=str(thread.org_id),
+            user_id=str(thread.user_id),
+            title=thread.title,
+            is_active=thread.is_active,
+            created_at=thread.created_at.isoformat(),
+            updated_at=thread.updated_at.isoformat() if thread.updated_at else None,
+            last_message_at=thread.last_message_at.isoformat() if thread.last_message_at else None,
+            messages=[
+                ChatMessageResponse(
+                    id=str(msg.id),
+                    thread_id=str(msg.thread_id),
+                    role=msg.role,
+                    content=msg.content,
+                    metadata=msg.message_metadata,
+                    created_at=msg.created_at.isoformat()
+                )
+                for msg in messages
+            ]
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid thread ID format")
+    except Exception as e:
+        logger.error(f"Error getting chat thread: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting chat thread: {str(e)}")
+
+@router.put("/threads/{thread_id}/title")
+async def update_thread_title(
+    thread_id: str,
+    title: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update the title of a chat thread.
+    """
+    try:
+        thread_uuid = uuid.UUID(thread_id)
+        thread = db.query(ChatThread).filter(
+            ChatThread.id == thread_uuid,
+            ChatThread.user_id == current_user.id,
+            ChatThread.org_id == current_user.org_id,
+            ChatThread.is_active == True
+        ).first()
+        
+        if not thread:
+            raise HTTPException(status_code=404, detail="Chat thread not found")
+        
+        thread.title = title
+        db.commit()
+        db.refresh(thread)
+        
+        return {"message": "Thread title updated", "title": thread.title}
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid thread ID format")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating thread title: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error updating thread title: {str(e)}")
+
+@router.delete("/threads/{thread_id}")
+async def delete_chat_thread(
+    thread_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Soft delete a chat thread (sets is_active to False).
+    """
+    try:
+        thread_uuid = uuid.UUID(thread_id)
+        thread = db.query(ChatThread).filter(
+            ChatThread.id == thread_uuid,
+            ChatThread.user_id == current_user.id,
+            ChatThread.org_id == current_user.org_id,
+            ChatThread.is_active == True
+        ).first()
+        
+        if not thread:
+            raise HTTPException(status_code=404, detail="Chat thread not found")
+        
+        thread.is_active = False
+        db.commit()
+        
+        return {"message": "Chat thread deleted successfully"}
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid thread ID format")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting chat thread: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error deleting chat thread: {str(e)}")
+
 @router.post("/conversation", response_model=ChatConversation)
 async def create_conversation(org_id: str):
     """
     Create a new conversation for an organization.
+    DEPRECATED: Use /threads endpoint instead.
     
     Args:
         org_id: Organization ID
@@ -303,7 +688,8 @@ async def websocket_chat_endpoint(
     user_id: str,
     session_id: Optional[str] = Query(None),
     user_name: Optional[str] = Query(None),
-    token: Optional[str] = Query(None)  # Authentication token
+    token: Optional[str] = Query(None),  # Authentication token
+    thread_id: Optional[str] = Query(None)  # Chat thread ID for history
 ):
     """
     WebSocket endpoint for real-time chat functionality.
@@ -314,10 +700,12 @@ async def websocket_chat_endpoint(
         user_id: User ID (should match authenticated user)
         session_id: Optional session ID (will generate if not provided)
         user_name: Optional user display name
-        token: JWT authentication token (required for authenticated access)
+        token: JWT authentication token (required for authenticated access and chat history)
+        thread_id: Optional chat thread ID - if provided, messages will be saved to this thread.
+                  If not provided and user is authenticated, a new thread will be created.
     
     Note: If token is provided, user will be authenticated and org_id will be resolved from user.
-          If token is not provided, connection will work but with limited functionality.
+          Chat history is only saved when token is provided.
     """
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -392,7 +780,7 @@ async def websocket_chat_endpoint(
                 message_type = message_data.get("type", MessageType.CHAT_MESSAGE)
                 
                 if message_type == MessageType.CHAT_MESSAGE:
-                    await handle_chat_message(session_id, resolved_org_id, user_id, user_name, message_data, current_user)
+                    await handle_chat_message(session_id, resolved_org_id, user_id, user_name, message_data, current_user, thread_id)
                 elif message_type == MessageType.TYPING_INDICATOR:
                     await handle_typing_indicator(session_id, resolved_org_id, user_id, user_name, message_data)
                 elif message_type == "ping":
@@ -455,7 +843,8 @@ async def handle_chat_message(
     user_id: str, 
     user_name: Optional[str], 
     message_data: dict,
-    current_user: Optional[User] = None
+    current_user: Optional[User] = None,
+    thread_id: Optional[str] = None
 ):
     """
     Handle incoming chat messages and generate AI responses using the full chat logic.
@@ -469,14 +858,54 @@ async def handle_chat_message(
         user_name: User display name
         message_data: Message data from client
         current_user: Authenticated user object (if available)
+        thread_id: Chat thread ID for saving history (if available)
     """
     try:
         content = message_data.get("content", "").strip()
         if not content:
             return
-            
-        conversation_id = message_data.get("conversation_id")
+        
+        # Get thread_id from message or use provided one
+        message_thread_id = message_data.get("thread_id") or thread_id
         k = message_data.get("k", 5)  # Number of documents to retrieve
+        
+        # Get or create thread if user is authenticated
+        db_thread = None
+        if current_user and message_thread_id:
+            db = SessionLocal()
+            try:
+                db_thread = get_or_create_thread(message_thread_id, str(current_user.id), str(current_user.org_id), db)
+                message_thread_id = str(db_thread.id)
+                # Save user message
+                save_user_message(message_thread_id, str(current_user.id), str(current_user.org_id), content, db)
+            except Exception as e:
+                logger.error(f"Error saving user message: {str(e)}")
+            finally:
+                db.close()
+        elif current_user and not message_thread_id:
+            # Create new thread for authenticated user
+            db = SessionLocal()
+            try:
+                db_thread = get_or_create_thread(None, str(current_user.id), str(current_user.org_id), db)
+                message_thread_id = str(db_thread.id)
+                # Save user message
+                save_user_message(message_thread_id, str(current_user.id), str(current_user.org_id), content, db)
+                # Notify client about new thread_id
+                thread_notification = WebSocketMessage(
+                    type="system_message",
+                    data={
+                        "message": f"New chat thread created: {message_thread_id}",
+                        "thread_id": message_thread_id,
+                        "status": "thread_created"
+                    },
+                    sender_id="system",
+                    room_id=org_id
+                )
+                await websocket_manager.send_message(session_id, thread_notification)
+            except Exception as e:
+                logger.error(f"Error creating thread: {str(e)}")
+            finally:
+                db.close()
         
         # Echo the user message to all users in the organization
         user_message = WebSocketMessage(
@@ -486,7 +915,7 @@ async def handle_chat_message(
                 "sender_id": user_id,
                 "sender_name": user_name,
                 "message_type": "user",
-                "conversation_id": conversation_id
+                "thread_id": message_thread_id
             },
             sender_id=user_id,
             room_id=org_id
@@ -530,6 +959,23 @@ async def handle_chat_message(
                 
                 processing_time = (datetime.utcnow() - start_time).total_seconds()
                 
+                # Save assistant message if user is authenticated (fallback mode)
+                if current_user and message_thread_id:
+                    db = SessionLocal()
+                    try:
+                        save_assistant_message(
+                            message_thread_id,
+                            str(current_user.id),
+                            str(current_user.org_id),
+                            response_text,
+                            {"sources": sources, "processing_time": processing_time},
+                            db
+                        )
+                    except Exception as e:
+                        logger.error(f"Error saving assistant message: {str(e)}")
+                    finally:
+                        db.close()
+                
                 # Send AI response
                 ai_response = WebSocketMessage(
                     type="ai_response",
@@ -537,7 +983,7 @@ async def handle_chat_message(
                         "response": response_text,
                         "sources": sources,
                         "processing_time": processing_time,
-                        "conversation_id": conversation_id,
+                        "thread_id": message_thread_id,
                         "sender_id": "ai_assistant",
                         "sender_name": "QueryGuard AI",
                         "message_type": "assistant"
@@ -589,13 +1035,30 @@ async def handle_chat_message(
                     
                     processing_time = (datetime.utcnow() - start_time).total_seconds()
                     
+                    # Save assistant message if user is authenticated
+                    if current_user and message_thread_id:
+                        db = SessionLocal()
+                        try:
+                            save_assistant_message(
+                                message_thread_id,
+                                str(current_user.id),
+                                str(current_user.org_id),
+                                reply_text,
+                                {"processing_time": processing_time},
+                                db
+                            )
+                        except Exception as e:
+                            logger.error(f"Error saving assistant message: {str(e)}")
+                        finally:
+                            db.close()
+                    
                     ai_response = WebSocketMessage(
                         type="ai_response",
                         data={
                             "response": reply_text,
                             "sources": [],
                             "processing_time": processing_time,
-                            "conversation_id": conversation_id,
+                            "thread_id": message_thread_id,
                             "impacted_query_ids": [],
                             "impacted_queries": [],
                             "pr_repo_data": None,
@@ -629,6 +1092,10 @@ async def handle_chat_message(
                         "SYSTEM ROLE: You are Zane AI, an assistant that helps analyze data lineage and change impacts.\n"
                         "BEHAVIOR:\n"
                         "- Be concise and helpful.\n"
+                        "- CRITICAL: If a tool returns 'NO DATA FOUND' or indicates no data is available, you MUST tell the user that no data was found. DO NOT make up or assume information.\n"
+                        "- CRITICAL: If the create_jira_ticket tool returns 'JIRA CONNECTION NOT CONFIGURED' or 'JIRA ERROR', you MUST inform the user that Jira is not set up. DO NOT try other tools - this is a configuration issue, not a data issue.\n"
+                        "- DO NOT hallucinate lineage relationships, impacted queries, or any data that isn't explicitly returned by the tools.\n"
+                        "- DO NOT try alternative tools when a tool fails due to configuration issues (like missing Jira connection).\n"
                         "- If the user greets you (e.g., 'hi', 'hello'), respond with a short intro of who you are and how you can help (lineage Q&A, query impact analysis, PR analysis, code suggestions, and Jira ticket creation).\n"
                         "- If the question is about schema/column changes or 'impacted queries', you MUST use the query_history_search tool.\n"
                         "- When reporting impacted queries, return a concise, numbered list with a short SQL preview for each query, not just IDs.\n"
@@ -636,6 +1103,8 @@ async def handle_chat_message(
                         "- If the question is about PR analysis or repository information, use the pr_repo_analysis tool.\n"
                         "- If the question asks for code suggestions, fixes, or changes needed based on PR analysis, use the code_suggestion tool.\n"
                         "- If the question asks to create a Jira ticket, use the create_jira_ticket tool.\n"
+                        "- When tools return 'NO DATA FOUND', acknowledge this clearly to the user without making assumptions.\n"
+                        "- When tools return configuration errors (like 'JIRA CONNECTION NOT CONFIGURED'), inform the user about the configuration issue and do NOT try other tools.\n"
                     )
                     # Nudge the agent to preferred tool if classification is specific
                     preferred_hint = (
@@ -692,6 +1161,34 @@ async def handle_chat_message(
                     
                     processing_time = (datetime.utcnow() - start_time).total_seconds()
                     
+                    # Prepare metadata for saving
+                    message_metadata = {
+                        "impacted_query_ids": impacted_query_ids,
+                        "impacted_queries": impacted_queries,
+                        "pr_repo_data": pr_repo_data,
+                        "code_suggestions": code_suggestions,
+                        "jira_ticket": jira_ticket,
+                        "processing_time": processing_time,
+                        "sources": []
+                    }
+                    
+                    # Save assistant message if user is authenticated
+                    if current_user and message_thread_id:
+                        db = SessionLocal()
+                        try:
+                            save_assistant_message(
+                                message_thread_id,
+                                str(current_user.id),
+                                str(current_user.org_id),
+                                response_text,
+                                message_metadata,
+                                db
+                            )
+                        except Exception as e:
+                            logger.error(f"Error saving assistant message: {str(e)}")
+                        finally:
+                            db.close()
+                    
                     # Send AI response with all data
                     ai_response = WebSocketMessage(
                         type="ai_response",
@@ -699,7 +1196,7 @@ async def handle_chat_message(
                             "response": response_text,
                             "sources": [],  # Tool outputs include their own context
                             "processing_time": processing_time,
-                            "conversation_id": conversation_id,
+                            "thread_id": message_thread_id,
                             "impacted_query_ids": impacted_query_ids,
                             "impacted_queries": impacted_queries,
                             "pr_repo_data": pr_repo_data,
@@ -725,7 +1222,7 @@ async def handle_chat_message(
                     "sources": [],
                     "error": str(e),
                     "processing_time": (datetime.utcnow() - start_time).total_seconds(),
-                    "conversation_id": conversation_id,
+                    "thread_id": message_thread_id,
                     "impacted_query_ids": [],
                     "impacted_queries": [],
                     "pr_repo_data": None,
@@ -874,56 +1371,233 @@ async def get_websocket_test_page():
         <title>QueryGuard Chat WebSocket Test</title>
         <style>
             body { font-family: Arial, sans-serif; margin: 20px; }
-            .container { max-width: 800px; margin: 0 auto; }
-            .messages { height: 400px; border: 1px solid #ccc; overflow-y: scroll; padding: 10px; margin: 10px 0; }
-            .message { margin: 5px 0; padding: 5px; border-radius: 5px; }
-            .user-message { background-color: #e3f2fd; }
-            .ai-message { background-color: #f3e5f5; }
-            .system-message { background-color: #fff3e0; font-style: italic; }
-            .input-group { display: flex; gap: 10px; margin: 10px 0; }
-            input, button { padding: 8px; }
-            input[type="text"] { flex: 1; }
-            .status { margin: 10px 0; font-weight: bold; }
+            .container { max-width: 1200px; margin: 0 auto; display: flex; gap: 20px; }
+            .left-panel { width: 300px; }
+            .right-panel { flex: 1; }
+            .thread-list { border: 1px solid #ccc; padding: 10px; margin: 10px 0; max-height: 300px; overflow-y: scroll; }
+            .thread-item { padding: 8px; margin: 5px 0; border: 1px solid #ddd; cursor: pointer; border-radius: 4px; }
+            .thread-item:hover { background-color: #f0f0f0; }
+            .thread-item.active { background-color: #e3f2fd; border-color: #2196F3; }
+            .messages { height: 400px; border: 1px solid #ccc; overflow-y: scroll; padding: 10px; margin: 10px 0; background: #fafafa; }
+            .message { margin: 5px 0; padding: 8px; border-radius: 5px; }
+            .user-message { background-color: #e3f2fd; margin-left: 20%; }
+            .ai-message { background-color: #f3e5f5; margin-right: 20%; }
+            .system-message { background-color: #fff3e0; font-style: italic; text-align: center; }
+            .input-group { display: flex; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+            input, button, select { padding: 8px; }
+            input[type="text"] { flex: 1; min-width: 200px; }
+            .status { margin: 10px 0; font-weight: bold; padding: 8px; background: #f5f5f5; border-radius: 4px; }
+            .thread-info { margin: 10px 0; padding: 8px; background: #e8f5e9; border-radius: 4px; font-size: 12px; }
+            button { cursor: pointer; }
+            button:disabled { opacity: 0.5; cursor: not-allowed; }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>QueryGuard Chat WebSocket Test</h1>
-            
-            <div class="input-group">
-                <input type="text" id="orgId" placeholder="Organization ID" value="76d33fb3-6062-456b-a211-4aec9971f8be">
-                <input type="text" id="userId" placeholder="User ID" value="test-user">
-                <input type="text" id="userName" placeholder="User Name" value="Test User">
-                <input type="text" id="token" placeholder="JWT Token (optional, for full features)" style="width: 300px;">
-                <button onclick="connect()">Connect</button>
-                <button onclick="disconnect()">Disconnect</button>
-            </div>
-            <div style="margin: 10px 0; font-size: 12px; color: #666;">
-                <strong>Note:</strong> Without token = Simple QA mode. With token = Full features (agents, tools, impact analysis, etc.)
-                <br>Get token from: <code>POST /auth/login</code>
+            <div class="left-panel">
+                <h2>Chat Threads</h2>
+                <div class="input-group">
+                    <button onclick="loadThreads()" id="loadThreadsBtn">Load Threads</button>
+                    <button onclick="createNewThread()" id="createThreadBtn">New Chat</button>
+                </div>
+                <div class="thread-list" id="threadList">
+                    <p style="text-align: center; color: #999;">Click "Load Threads" to see your chats</p>
+                </div>
             </div>
             
-            <div class="status" id="status">Disconnected</div>
-            
-            <div class="messages" id="messages"></div>
-            
-            <div class="input-group">
-                <input type="text" id="messageInput" placeholder="Type your message..." onkeypress="handleKeyPress(event)">
-                <button onclick="sendMessage()">Send</button>
-                <button onclick="sendTyping(true)">Start Typing</button>
-                <button onclick="sendTyping(false)">Stop Typing</button>
+            <div class="right-panel">
+                <h1>QueryGuard Chat WebSocket Test</h1>
+                
+                <div class="input-group">
+                    <input type="text" id="orgId" placeholder="Organization ID" value="76d33fb3-6062-456b-a211-4aec9971f8be">
+                    <input type="text" id="userId" placeholder="User ID" value="test-user">
+                    <input type="text" id="userName" placeholder="User Name" value="Test User">
+                    <input type="text" id="token" placeholder="JWT Token (required for history)" style="width: 300px;">
+                </div>
+                <div class="input-group">
+                    <select id="threadSelect" style="flex: 1;">
+                        <option value="">-- Select Thread or Create New --</option>
+                    </select>
+                    <button onclick="connect()" id="connectBtn">Connect</button>
+                    <button onclick="disconnect()" id="disconnectBtn">Disconnect</button>
+                </div>
+                <div style="margin: 10px 0; font-size: 12px; color: #666;">
+                    <strong>Note:</strong> Token is required for chat history. Without token = Simple QA mode (no history).
+                    <br>Get token from: <code>POST /auth/login</code>
+                </div>
+                
+                <div class="thread-info" id="threadInfo" style="display: none;">
+                    <strong>Current Thread:</strong> <span id="currentThreadId">None</span>
+                </div>
+                
+                <div class="status" id="status">Disconnected</div>
+                
+                <div class="messages" id="messages"></div>
+                
+                <div class="input-group">
+                    <input type="text" id="messageInput" placeholder="Type your message..." onkeypress="handleKeyPress(event)" disabled>
+                    <button onclick="sendMessage()" id="sendBtn" disabled>Send</button>
+                    <button onclick="sendTyping(true)">Start Typing</button>
+                    <button onclick="sendTyping(false)">Stop Typing</button>
+                </div>
             </div>
         </div>
 
         <script>
             let ws = null;
             let sessionId = null;
+            let currentThreadId = null;
+            let token = null;
+            const baseUrl = window.location.origin.replace('http', 'ws');
+
+            // Load user's chat threads
+            async function loadThreads() {
+                token = document.getElementById('token').value.trim();
+                if (!token) {
+                    alert('Please enter JWT token to load threads');
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/chat/threads', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to load threads');
+                    }
+                    
+                    const threads = await response.json();
+                    displayThreads(threads);
+                    populateThreadSelect(threads);
+                } catch (error) {
+                    alert('Error loading threads: ' + error.message);
+                    console.error(error);
+                }
+            }
+
+            function displayThreads(threads) {
+                const threadList = document.getElementById('threadList');
+                threadList.innerHTML = '';
+                
+                if (threads.length === 0) {
+                    threadList.innerHTML = '<p style="text-align: center; color: #999;">No threads found. Create a new chat!</p>';
+                    return;
+                }
+                
+                threads.forEach(thread => {
+                    const div = document.createElement('div');
+                    div.className = 'thread-item' + (thread.id === currentThreadId ? ' active' : '');
+                    div.innerHTML = `
+                        <div style="font-weight: bold;">${thread.title || 'Untitled'}</div>
+                        <div style="font-size: 11px; color: #666;">
+                            ${thread.message_count} messages • ${new Date(thread.last_message_at || thread.created_at).toLocaleString()}
+                        </div>
+                    `;
+                    div.onclick = () => selectThread(thread.id);
+                    threadList.appendChild(div);
+                });
+            }
+
+            function populateThreadSelect(threads) {
+                const select = document.getElementById('threadSelect');
+                select.innerHTML = '<option value="">-- Select Thread or Create New --</option>';
+                threads.forEach(thread => {
+                    const option = document.createElement('option');
+                    option.value = thread.id;
+                    option.textContent = `${thread.title || 'Untitled'} (${thread.message_count} msgs)`;
+                    select.appendChild(option);
+                });
+            }
+
+            async function createNewThread() {
+                token = document.getElementById('token').value.trim();
+                if (!token) {
+                    alert('Please enter JWT token to create thread');
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/chat/threads', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ title: 'New Chat' })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to create thread');
+                    }
+                    
+                    const thread = await response.json();
+                    currentThreadId = thread.id;
+                    document.getElementById('threadSelect').value = thread.id;
+                    updateThreadInfo(thread.id);
+                    await loadThreads(); // Reload list
+                    alert('New thread created! Thread ID: ' + thread.id);
+                } catch (error) {
+                    alert('Error creating thread: ' + error.message);
+                    console.error(error);
+                }
+            }
+
+            async function selectThread(threadId) {
+                token = document.getElementById('token').value.trim();
+                if (!token) {
+                    alert('Please enter JWT token');
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`/chat/threads/${threadId}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to load thread');
+                    }
+                    
+                    const thread = await response.json();
+                    currentThreadId = thread.id;
+                    document.getElementById('threadSelect').value = thread.id;
+                    updateThreadInfo(thread.id);
+                    
+                    // Clear and load messages
+                    document.getElementById('messages').innerHTML = '';
+                    thread.messages.forEach(msg => {
+                        addMessage(
+                            msg.role === 'user' ? 'You' : 'QueryGuard AI',
+                            msg.content,
+                            msg.role === 'user' ? 'user' : 'ai'
+                        );
+                    });
+                    
+                    await loadThreads(); // Reload to highlight active
+                } catch (error) {
+                    alert('Error loading thread: ' + error.message);
+                    console.error(error);
+                }
+            }
+
+            function updateThreadInfo(threadId) {
+                const info = document.getElementById('threadInfo');
+                const idSpan = document.getElementById('currentThreadId');
+                if (threadId) {
+                    info.style.display = 'block';
+                    idSpan.textContent = threadId;
+                } else {
+                    info.style.display = 'none';
+                }
+            }
 
             function connect() {
                 const orgId = document.getElementById('orgId').value;
                 const userId = document.getElementById('userId').value;
                 const userName = document.getElementById('userName').value;
-                const token = document.getElementById('token').value.trim();
+                token = document.getElementById('token').value.trim();
+                const selectedThreadId = document.getElementById('threadSelect').value;
                 
                 if (!orgId || !userId) {
                     alert('Please enter Organization ID and User ID');
@@ -931,18 +1605,31 @@ async def get_websocket_test_page():
                 }
                 
                 sessionId = 'test-session-' + Math.random().toString(36).substr(2, 9);
-                let wsUrl = `ws://localhost:8000/chat/ws/${orgId}/${userId}?session_id=${sessionId}&user_name=${encodeURIComponent(userName)}`;
+                let wsUrl = `${baseUrl}/chat/ws/${orgId}/${userId}?session_id=${sessionId}&user_name=${encodeURIComponent(userName)}`;
                 
-                // Add token if provided (for full features)
+                // Add token if provided (for full features and history)
                 if (token) {
                     wsUrl += `&token=${encodeURIComponent(token)}`;
+                }
+                
+                // Add thread_id if selected
+                if (selectedThreadId) {
+                    wsUrl += `&thread_id=${encodeURIComponent(selectedThreadId)}`;
+                    currentThreadId = selectedThreadId;
+                    updateThreadInfo(selectedThreadId);
                 }
                 
                 ws = new WebSocket(wsUrl);
                 
                 ws.onopen = function(event) {
                     document.getElementById('status').textContent = 'Connected';
+                    document.getElementById('status').style.background = '#c8e6c9';
+                    document.getElementById('messageInput').disabled = false;
+                    document.getElementById('sendBtn').disabled = false;
                     addMessage('System', 'Connected to WebSocket', 'system');
+                    if (currentThreadId) {
+                        addMessage('System', `Using thread: ${currentThreadId}`, 'system');
+                    }
                 };
                 
                 ws.onmessage = function(event) {
@@ -952,6 +1639,9 @@ async def get_websocket_test_page():
                 
                 ws.onclose = function(event) {
                     document.getElementById('status').textContent = 'Disconnected';
+                    document.getElementById('status').style.background = '#ffcdd2';
+                    document.getElementById('messageInput').disabled = true;
+                    document.getElementById('sendBtn').disabled = true;
                     addMessage('System', 'WebSocket connection closed', 'system');
                 };
                 
@@ -975,7 +1665,8 @@ async def get_websocket_test_page():
                 
                 const message = {
                     type: 'chat_message',
-                    content: content
+                    content: content,
+                    thread_id: currentThreadId  // Include thread_id in message
                 };
                 
                 ws.send(JSON.stringify(message));
@@ -1003,6 +1694,12 @@ async def get_websocket_test_page():
                         break;
                     case 'ai_response':
                         let aiText = data.data.response;
+                        // Update thread_id if received
+                        if (data.data.thread_id && !currentThreadId) {
+                            currentThreadId = data.data.thread_id;
+                            updateThreadInfo(data.data.thread_id);
+                            document.getElementById('threadSelect').value = data.data.thread_id;
+                        }
                         // Show additional data if available
                         if (data.data.impacted_queries && data.data.impacted_queries.length > 0) {
                             aiText += '\\n\\n[Impacted Queries: ' + data.data.impacted_queries.length + ' found]';
@@ -1019,12 +1716,22 @@ async def get_websocket_test_page():
                         if (data.data.processing_time) {
                             aiText += '\\n(Processing time: ' + data.data.processing_time.toFixed(2) + 's)';
                         }
+                        if (data.data.thread_id) {
+                            aiText += '\\n[Thread ID: ' + data.data.thread_id + ']';
+                        }
                         addMessage('QueryGuard AI', aiText, 'ai');
                         // Log full response to console for debugging
                         console.log('Full AI Response:', data.data);
                         break;
                     case 'system_message':
                         addMessage('System', data.data.message, 'system');
+                        // Handle thread creation notification
+                        if (data.data.thread_id && data.data.status === 'thread_created') {
+                            currentThreadId = data.data.thread_id;
+                            updateThreadInfo(data.data.thread_id);
+                            document.getElementById('threadSelect').value = data.data.thread_id;
+                            loadThreads(); // Reload thread list
+                        }
                         break;
                     case 'typing':
                         const typingSender = data.data.sender_name || data.sender_id;
@@ -1042,7 +1749,9 @@ async def get_websocket_test_page():
                 const messages = document.getElementById('messages');
                 const messageDiv = document.createElement('div');
                 messageDiv.className = `message ${type}-message`;
-                messageDiv.innerHTML = `<strong>${sender}:</strong> ${content}`;
+                // Format content with line breaks
+                const formattedContent = content.replace(/\\n/g, '<br>');
+                messageDiv.innerHTML = `<strong>${sender}:</strong><br>${formattedContent}`;
                 messages.appendChild(messageDiv);
                 messages.scrollTop = messages.scrollHeight;
             }
@@ -1052,6 +1761,16 @@ async def get_websocket_test_page():
                     sendMessage();
                 }
             }
+
+            // Thread select change handler
+            document.getElementById('threadSelect').addEventListener('change', function(e) {
+                if (e.target.value) {
+                    selectThread(e.target.value);
+                } else {
+                    currentThreadId = null;
+                    updateThreadInfo(null);
+                }
+            });
         </script>
     </body>
     </html>

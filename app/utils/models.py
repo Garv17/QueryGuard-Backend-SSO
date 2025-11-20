@@ -362,6 +362,44 @@ class InformationSchemacolumns(Base):
     organization = relationship("Organization", foreign_keys=[org_id], backref="information_schema_columns_org_id")
     connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="information_schema_columns_conn_id")
 
+class ChatThread(Base):
+    """Chat conversation thread - represents a chat session/conversation"""
+    __tablename__ = "chat_threads"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=True)  # Auto-generated from first message or user-provided
+    is_active = Column(Boolean, default=True)  # Soft delete flag
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_message_at = Column(DateTime(timezone=True), nullable=True)  # Timestamp of last message
+
+    # Relationships
+    organization = relationship("Organization", backref="chat_threads")
+    user = relationship("User", backref="chat_threads")
+    messages = relationship("ChatMessage", back_populates="thread", cascade="all, delete-orphan", order_by="ChatMessage.created_at")
+
+
+class ChatMessage(Base):
+    """Individual chat message within a thread"""
+    __tablename__ = "chat_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    thread_id = Column(UUID(as_uuid=True), ForeignKey("chat_threads.id"), nullable=False, index=True)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # "user" or "assistant"
+    content = Column(Text, nullable=False)  # Message content
+    message_metadata = Column(JSONB, nullable=True)  # Store additional data like impacted_queries, pr_repo_data, etc.
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # Relationships
+    thread = relationship("ChatThread", back_populates="messages")
+    organization = relationship("Organization", backref="chat_messages")
+    user = relationship("User", backref="chat_messages")
+
+
 class ColumnLevelLineage(Base):
     __tablename__ = "column_level_lineage"
 

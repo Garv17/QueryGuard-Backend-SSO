@@ -8,7 +8,7 @@ from requests.auth import HTTPBasicAuth
 import logging
 
 from app.vector_db import get_db_connection
-from app.vector_db import LLM
+from app.vector_db import CHAT_LLM
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,8 @@ def create_jira_ticket_for_org(
     # Get active Jira connection
     connection = get_active_jira_connection(org_id)
     if not connection:
-        return {"error": "No active Jira connection found for this organization"}
+        logger.warning(f"No active Jira connection found for org_id={org_id}")
+        return {"error": "No active Jira connection found for this organization. Please configure a Jira connection first using the /jira/save-connection endpoint."}
     
     # Use connection defaults if not provided
     final_issue_type = issue_type or connection.get("issue_type") or "Task"
@@ -271,7 +272,7 @@ Respond with ONLY valid JSON in this format:
 """
         
         try:
-            llm_response = LLM.invoke(extract_prompt)
+            llm_response = CHAT_LLM.invoke(extract_prompt)
             response_text = getattr(llm_response, "content", str(llm_response))
             
             # Try to parse JSON from response
@@ -302,7 +303,12 @@ Respond with ONLY valid JSON in this format:
             )
             
             if "error" in result:
-                return f"Error: {result['error']}"
+                error_msg = result['error']
+                # Make connection errors very explicit
+                if "no active jira connection" in error_msg.lower() or "connection not found" in error_msg.lower():
+                    return f"JIRA CONNECTION NOT CONFIGURED: {error_msg}. Please set up a Jira connection first using the /jira/save-connection endpoint. DO NOT try other tools - this is a configuration issue that must be resolved before creating tickets."
+                # For other errors, also make it clear
+                return f"JIRA ERROR: {error_msg}. The Jira ticket could not be created. DO NOT try other tools - this is a Jira-specific operation."
             
             # Format response
             parts = ["✅ Jira ticket created successfully!"]
@@ -352,13 +358,19 @@ Respond with ONLY valid JSON in this format:
             
         except Exception as e:
             logger.error(f"Failed to create Jira ticket: {e}", exc_info=True)
-            return f"Error: Failed to create Jira ticket: {str(e)}"
+            error_str = str(e).lower()
+            # Check if it's a connection/configuration error
+            if "connection" in error_str or "not found" in error_str or "not configured" in error_str:
+                return f"JIRA CONNECTION NOT CONFIGURED: Failed to create Jira ticket - {str(e)}. Please set up a Jira connection first using the /jira/save-connection endpoint. DO NOT try other tools - this is a configuration issue."
+            return f"JIRA ERROR: Failed to create Jira ticket: {str(e)}. DO NOT try other tools - this is a Jira-specific operation."
     
     return Tool(
         name="create_jira_ticket",
         func=_fn,
         description=(
             "Create a Jira ticket for tracking issues, bugs, or tasks. "
+            "IMPORTANT: This tool requires a Jira connection to be configured. "
+            "If the tool returns 'JIRA CONNECTION NOT CONFIGURED', do NOT try other tools - inform the user that Jira must be set up first. "
             "Input should include: summary, description, and optionally issue_type, priority, assignee (email), pr_url, analysis_report_url. "
             "Example: 'Create a Jira ticket: Fix issue for impacted tables. Description: Downstream table is broken. Assign to: user@example.com'"
         ),

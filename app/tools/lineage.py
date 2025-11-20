@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Set, Tuple
 from langchain.agents import Tool
 from langchain.schema import Document
 from app.vector_db import get_qa_chain, CHAT_LLM, get_retriever
@@ -45,11 +45,18 @@ Respond only with JSON text, do not include any extra explanation.
 LINEAGE_FINAL_PROMPT = """
 You are a lineage analyst tasked with generating a **complete multi-hop downstream lineage report**.
 
+CRITICAL: You MUST ONLY report lineage relationships that are EXPLICITLY shown in the snippets. DO NOT assume, infer, or hallucinate relationships that are not clearly stated.
+
 You are given:
 1. The lineage question (identifies the source entity)
 2. ALL retrieved lineage context (multi-hop) as raw snippets from multiple iterations
 
-Your task:
+VALIDATION FIRST:
+- Check if snippets contain ANY information about the source entity from the question
+- If NO relevant information is found, you MUST respond with JSON containing: {{"lineage_report": "NO DATA FOUND: No lineage information available for {source_entity} in the knowledge base.", "source_entity": "{source_entity}", "downstream_entities": []}}
+- If snippets are found but don't show downstream dependencies, respond with: {{"lineage_report": "NO DATA FOUND: No downstream dependencies found for {source_entity} in the available lineage data.", "source_entity": "{source_entity}", "downstream_entities": []}}
+
+Your task (ONLY if validation passes):
 - Analyze ALL snippets to build a complete downstream lineage graph
 - Identify which entities are at DEPTH 1 (directly depend on source), DEPTH 2 (depend on depth 1), DEPTH 3 (depend on depth 2), etc.
 - Trace the complete chain: source → depth 1 → depth 2 → depth 3 → depth 4 → depth 5
@@ -412,74 +419,447 @@ Format as Markdown with clear depth levels. Include entity names and brief expla
             lineage_report += all_snippets_text[:3000]  # First 3000 chars of snippets
     
     if not lineage_report or len(lineage_report.strip()) < 50:
-        lineage_report = f"**Source Entity:** {source_entity}\n\n**Status:** Found {len(collected_docs)} relevant lineage documents. Unable to generate formatted report. Please review the lineage data directly."
+        # Check if we actually have relevant documents
+        if len(collected_docs) == 0:
+            lineage_report = f"**Source Entity:** {source_entity}\n\n**Status:** NO DATA FOUND: No lineage information available for '{source_entity}' in the knowledge base. Please verify the entity name and ensure lineage data has been ingested."
+        else:
+            # We have docs but couldn't generate report - might be irrelevant docs
+            lineage_report = f"**Source Entity:** {source_entity}\n\n**Status:** NO DATA FOUND: The retrieved documents do not contain specific lineage information for '{source_entity}'. Please verify the entity name."
     
     logger.info("lineage.recursive.final.result - report_length=%d, is_generic=%s", len(lineage_report), is_generic_confirmation)
     return lineage_report
 
 
 UPSTREAM_LINEAGE_PROMPT = """
-You are a lineage analyst. You will receive a question asking which columns feed into a target column, and context snippets from a lineage knowledge base.
+You are a lineage analyst. You will receive a question asking which columns feed into target column(s), and context snippets from a lineage knowledge base.
 
-Your task:
-1) Identify the TARGET column from the question (e.g., "departmentlist in dimsharedservicesallocationrule" or "dimsharedservicesallocationrule.departmentlist")
-2) From the snippets, extract ONLY the SPECIFIC source columns that directly feed into this target column
-3) DO NOT include all columns from a source table - only include columns that are explicitly shown to feed into the target
+CRITICAL: You MUST ONLY answer based on what is EXPLICITLY shown in the snippets. DO NOT assume, infer, or hallucinate relationships. DO NOT mention targets that are not in the question.
 
-CRITICAL RULES - READ CAREFULLY:
-- If the question asks "which columns feed into departmentlist in dimsharedservicesallocationrule", 
-  you need to find columns that FEED INTO (are sources of) departmentlist, NOT columns that departmentlist feeds into
-- Look for patterns like: source_column → target_column (where target is the one mentioned in the question)
-- If you see "allocationrule.departmentlist" → "dimsharedservicesallocationrule.departmentlist" in snippets,
-  ONLY list "allocationrule.departmentlist" as the source, NOT other columns from allocationrule
-- DO NOT list columns just because they're in the same table as a source column
-- Only list columns that have an explicit, direct dependency relationship shown in the snippets
-- Be EXTREMELY SELECTIVE - if a snippet shows 10 columns from allocationrule table, but only 1 feeds into the target, list ONLY that 1 column
-- Format your answer as a numbered list with ONLY the specific columns that feed into the target
+IMPORTANT: The snippets are formatted as separate fields. Each snippet represents ONE lineage relationship:
+- target_database: <database>
+- target_schema: <schema>
+- target_table: <table>
+- target_column: <column>
+- source_database: <database>
+- source_schema: <schema>
+- source_table: <table>
+- source_column: <column>
+
+This means: source_table.source_column → target_table.target_column
+
+TARGET COLUMNS FROM QUESTION (ONLY answer for these):
+{target_info}
+
+YOUR TASK:
+1. Look at the question and identify EXACTLY which target column(s) are mentioned
+2. For EACH target column mentioned in the question, find snippets where target_table AND target_column match that target
+3. Extract ONLY the source_table and source_column from those matching snippets
+4. Format each source as: `source_database.source_schema.source_table.source_column`
+5. If question mentions ONE target, answer for ONE target only. If question mentions TWO targets, answer for TWO targets only.
+
+CRITICAL RULES - FOLLOW STRICTLY:
+
+**RULE 1: ANSWER ONLY FOR TARGETS IN THE QUESTION**
+- Count how many targets are mentioned in the question
+- Answer ONLY for those targets - no more, no less
+- If question asks about "allocationrule.departmentlist" (ONE target), answer for ONE target only
+- DO NOT mention "second target" or "other targets" if they're not in the question
+
+**RULE 2: SAME TABLE = NOT A SOURCE**
+- If target is "allocationrule.accountto", DO NOT include "allocationrule.accountlist" or ANY column from "allocationrule" table
+- Columns from the same table as the target are SIBLINGS, not SOURCES
+- A source MUST be from a DIFFERENT table than the target
+- Example: Target "allocationrule.accountto" → Valid source: "gl_summary.accountcd" ✓, Invalid: "allocationrule.accountlist" ✗
+
+**RULE 3: EXACT TARGET MATCHING**
+- Only use snippets where target_table AND target_column BOTH match the question's target
+- If question asks about "allocationrule.accountto", only use snippets with:
+  - target_table: allocationrule
+  - target_column: accountto
+- DO NOT use snippets with different target_column (e.g., target_column: accountlist) even if same table
+
+**RULE 4: ONE SOURCE PER SNIPPET**
+- Each snippet shows ONE source → ONE target relationship
+- If snippet shows "source_table: gl_summary, source_column: accountcd, target_table: allocationrule, target_column: accountto"
+  → This means ONLY "gl_summary.accountcd" feeds into "allocationrule.accountto"
+  → DO NOT include other columns from gl_summary or allocationrule
+
+**RULE 5: NO DATA = SAY SO (ONLY FOR TARGETS IN QUESTION)**
+- If no snippets match a target mentioned in the question → "NO DATA FOUND: No lineage information available for [target]"
+- If snippets exist but show no sources → "NO DATA FOUND: No upstream sources found for [target]"
+- DO NOT mention targets that are NOT in the question
+
+EXAMPLE - SINGLE TARGET:
+
+Question: "Which columns feed into transform_zone.edw.allocationrule.departmentlist?"
+Snippets:
+- target_database: transform_zone, target_schema: edw, target_table: allocationrule, target_column: departmentlist, source_database: transform_zone, source_schema: edw, source_table: gl_summary, source_column: deptcd
+
+Correct Answer:
+The columns that feed into `transform_zone.edw.allocationrule.departmentlist` are:
+1. `transform_zone.edw.gl_summary.deptcd`
+
+Incorrect Answer (DO NOT DO THIS):
+The columns that feed into `transform_zone.edw.allocationrule.departmentlist` are:
+1. `transform_zone.edw.gl_summary.deptcd`
+For the second target `edw.allocationrule`, there is no lineage information available.
+
+✗ WRONG: Question only mentions ONE target, so do NOT mention a "second target"
+
+EXAMPLE - MULTIPLE TARGETS:
+
+Question: "Which columns feed into allocationrule.accountto and allocationrule.marketlist?"
+Snippets:
+- target_table: allocationrule, target_column: accountto, source_table: gl_summary, source_column: accountcd
+- target_table: allocationrule, target_column: marketlist, source_table: gl_summary, source_column: segment3
+
+Correct Answer:
+The columns that feed into `allocationrule.accountto` are:
+1. `transform_zone.edw.gl_summary.accountcd`
+
+The columns that feed into `allocationrule.marketlist` are:
+1. `transform_zone.edw.gl_summary.segment3`
 
 Question:
 {question}
 
-Context Snippets:
+Context Snippets (ONLY snippets matching the target columns are included):
 {snippets}
 
-Provide a clear, numbered list of ONLY the specific columns that feed into the target. 
-Example: If target is "dimsharedservicesallocationrule.departmentlist" and only "allocationrule.departmentlist" feeds into it, 
-your answer should be:
-1. `transform_zone.edw.allocationrule.departmentlist`
-
-Do NOT include other columns from allocationrule unless they also explicitly feed into the target.
+Now provide your answer. Count how many targets are in the question and answer for EXACTLY that many targets - no more, no less.
 """
+
+
+def _extract_targets_from_question(question: str) -> List[Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]]:
+    """
+    Extract ALL target database, schema, table, and column from question.
+    Handles multiple targets (e.g., "feed into X and Y").
+    Returns list of (database, schema, table, column) tuples.
+    More precise - only extracts full qualified names, avoids partial matches.
+    """
+    import re
+    targets = []
+    
+    # More precise patterns - look for full qualified column names
+    # Pattern 1: database.schema.table.column (4 parts)
+    pattern_4 = r"(\w+)\.(\w+)\.(\w+)\.(\w+)"
+    matches_4 = re.finditer(pattern_4, question, re.IGNORECASE)
+    for match in matches_4:
+        groups = match.groups()
+        targets.append((groups[0], groups[1], groups[2], groups[3]))
+    
+    # Pattern 2: schema.table.column (3 parts) - only if not already captured by 4-part pattern
+    # But be careful - this might match partials of 4-part patterns
+    # So we'll only use 3-part if it's clearly separate (has word boundaries)
+    pattern_3 = r"(?<!\w)(\w+)\.(\w+)\.(\w+)(?!\.\w)"  # 3 parts, not part of 4-part
+    matches_3 = re.finditer(pattern_3, question, re.IGNORECASE)
+    for match in matches_3:
+        groups = match.groups()
+        # Check if this is already part of a 4-part match
+        start, end = match.span()
+        is_part_of_4part = False
+        for target in targets:
+            # If we already have a 4-part target, skip 3-part matches that overlap
+            if target[0] is not None:  # 4-part target exists
+                is_part_of_4part = True
+                break
+        if not is_part_of_4part:
+            targets.append((None, groups[0], groups[1], groups[2]))
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_targets = []
+    for target in targets:
+        if target not in seen:
+            seen.add(target)
+            unique_targets.append(target)
+    
+    # If we have 4-part targets, prefer those and remove any 3-part that might be duplicates
+    if any(t[0] is not None for t in unique_targets):
+        # We have at least one 4-part target, filter out 3-part that are likely duplicates
+        filtered = []
+        for target in unique_targets:
+            if target[0] is not None:
+                filtered.append(target)
+            else:
+                # Check if this 3-part is a duplicate of a 4-part
+                is_duplicate = False
+                for t4 in unique_targets:
+                    if t4[0] is not None and t4[1:] == target[1:]:
+                        is_duplicate = True
+                        break
+                if not is_duplicate:
+                    filtered.append(target)
+        unique_targets = filtered
+    
+    return unique_targets if unique_targets else [(None, None, None, None)]
+
+
+def _validate_source_columns(answer: str, docs: List[Document], targets: List[Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]]) -> str:
+    """
+    Post-process LLM answer to validate that returned columns are actually sources.
+    Handles multiple targets - validates each section separately.
+    Filters out columns from the same table as any target (they're not sources, they're siblings).
+    Cross-references with actual documents to ensure accuracy.
+    """
+    import re
+    
+    # Extract all column references from answer (format: `database.schema.table.column`)
+    column_pattern = r"`([^`]+)`"
+    mentioned_columns = re.findall(column_pattern, answer)
+    
+    if not mentioned_columns:
+        return answer  # No columns to validate
+    
+    # Build a set of valid source columns from documents for EACH target
+    # A valid source must have target_table=target_table AND target_column=target_column
+    valid_sources: Set[str] = set()
+    target_tables: Set[str] = set()  # All target tables to filter against
+    
+    for target_db, target_schema, target_table, target_column in targets:
+        if target_table:
+            target_tables.add(target_table.lower())
+        
+        target_table_lower = target_table.lower() if target_table else None
+        target_column_lower = target_column.lower() if target_column else None
+        
+        for doc in docs:
+            content = doc.page_content.lower()
+            # Extract target and source from document
+            target_table_match = re.search(r"target_table:\s*(\w+)", content)
+            target_column_match = re.search(r"target_column:\s*(\w+)", content)
+            source_table_match = re.search(r"source_table:\s*(\w+)", content)
+            source_column_match = re.search(r"source_column:\s*(\w+)", content)
+            source_db_match = re.search(r"source_database:\s*(\w+)", content)
+            source_schema_match = re.search(r"source_schema:\s*(\w+)", content)
+            
+            # Check if this document is about our target
+            doc_target_table = target_table_match.group(1) if target_table_match else None
+            doc_target_column = target_column_match.group(1) if target_column_match else None
+            
+            if target_table_lower and target_column_lower:
+                # Must match both table and column
+                if doc_target_table == target_table_lower and doc_target_column == target_column_lower:
+                    # This is a valid source document
+                    if source_table_match and source_column_match:
+                        source_table = source_table_match.group(1)
+                        source_column = source_column_match.group(1)
+                        source_db = source_db_match.group(1) if source_db_match else None
+                        source_schema = source_schema_match.group(1) if source_schema_match else None
+                        
+                        # Build full column path
+                        parts = []
+                        if source_db:
+                            parts.append(source_db)
+                        if source_schema:
+                            parts.append(source_schema)
+                        parts.append(source_table)
+                        parts.append(source_column)
+                        valid_source = ".".join(parts)
+                        valid_sources.add(valid_source.lower())
+            elif target_table_lower:
+                # Only table match required
+                if doc_target_table == target_table_lower:
+                    if source_table_match and source_column_match:
+                        source_table = source_table_match.group(1)
+                        source_column = source_column_match.group(1)
+                        source_db = source_db_match.group(1) if source_db_match else None
+                        source_schema = source_schema_match.group(1) if source_schema_match else None
+                        
+                        parts = []
+                        if source_db:
+                            parts.append(source_db)
+                        if source_schema:
+                            parts.append(source_schema)
+                        parts.append(source_table)
+                        parts.append(source_column)
+                        valid_source = ".".join(parts)
+                        valid_sources.add(valid_source.lower())
+    
+    # Filter mentioned columns to only include valid sources
+    # CRITICAL: Filter out columns from the same table as ANY target (they're not sources)
+    filtered_columns = []
+    invalid_columns = []
+    
+    for col in mentioned_columns:
+        col_lower = col.lower()
+        col_parts = col_lower.split('.')
+        
+        # Extract table from column path (usually second-to-last)
+        col_table = None
+        if len(col_parts) >= 2:
+            col_table = col_parts[-2]  # e.g., "transform_zone.edw.allocationrule.departmentlist" -> "allocationrule"
+        elif len(col_parts) == 1:
+            continue  # Can't validate single part
+        
+        # CRITICAL: Filter out columns from the same table as ANY target
+        # These are NOT sources, they're just other columns in the same table
+        if col_table and col_table in target_tables:
+            invalid_columns.append(col)
+            logger.debug(f"Filtering out {col} - same table as target ({col_table})")
+            continue
+        
+        # Check if this column is in our valid sources set
+        if col_lower in valid_sources:
+            filtered_columns.append(col)
+        else:
+            # Check if it's a partial match
+            col_simple = ".".join(col_parts[-2:]) if len(col_parts) >= 2 else col_lower
+            if any(vs.endswith(col_simple) or vs == col_simple for vs in valid_sources):
+                filtered_columns.append(col)
+            else:
+                invalid_columns.append(col)
+                logger.debug(f"Filtering out {col} - not in valid sources")
+    
+    # Rebuild answer with only valid columns, preserving section structure
+    if not filtered_columns:
+        return "NO DATA FOUND: No valid upstream sources found for the requested columns in the available lineage data. The retrieved documents do not show any columns that feed into the targets."
+    
+    # Rebuild the answer section by section
+    lines = answer.split('\n')
+    new_lines = []
+    section_valid_count = {}  # Track count per section
+    current_section = None
+    
+    for line in lines:
+        line_stripped = line.strip()
+        
+        # Detect section headers (lines mentioning a target column)
+        for target_db, target_schema, target_table, target_column in targets:
+            if target_table and target_column:
+                target_pattern = rf"{target_table}\.{target_column}|{target_column}"
+                if re.search(target_pattern, line_stripped, re.IGNORECASE):
+                    current_section = f"{target_table}.{target_column}"
+                    if current_section not in section_valid_count:
+                        section_valid_count[current_section] = 0
+                    new_lines.append(line)  # Keep section header
+                    continue
+        
+        # Check if this line contains a column reference
+        col_match = re.search(column_pattern, line)
+        if col_match:
+            col = col_match.group(1)
+            col_lower = col.lower()
+            
+            # Check if this column is valid
+            if any(fc.lower() == col_lower for fc in filtered_columns):
+                if current_section:
+                    section_valid_count[current_section] += 1
+                    count = section_valid_count[current_section]
+                else:
+                    # Fallback: count all valid columns
+                    count = len([c for c in filtered_columns if c.lower() == col_lower])
+                
+                # Update numbering
+                new_line = re.sub(r'^\d+\.', f'{count}.', line)
+                new_lines.append(new_line)
+            # Skip invalid columns silently
+        else:
+            # Keep non-column lines (headers, explanations, etc.)
+            # But remove lines that mention invalid columns
+            if not any(col.lower() in line_stripped.lower() for col in invalid_columns):
+                new_lines.append(line)
+    
+    if invalid_columns:
+        logger.warning(f"Filtered out invalid source columns (same table as target or not in documents): {invalid_columns}")
+    
+    return '\n'.join(new_lines)
+
+
+def _filter_docs_by_targets(docs: List[Document], targets: List[Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]]) -> List[Document]:
+    """
+    Filter documents to only include those where target_table and target_column match the question's targets.
+    This ensures the LLM only sees relevant snippets, preventing it from including wrong columns.
+    """
+    import re
+    filtered_docs = []
+    
+    # Build set of (table, column) pairs from targets
+    target_pairs = set()
+    for target_db, target_schema, target_table, target_column in targets:
+        if target_table and target_column:
+            target_pairs.add((target_table.lower(), target_column.lower()))
+    
+    if not target_pairs:
+        # If we can't extract targets, return all docs (fallback)
+        return docs
+    
+    for doc in docs:
+        content = doc.page_content.lower()
+        # Extract target from document
+        target_table_match = re.search(r"target_table:\s*(\w+)", content)
+        target_column_match = re.search(r"target_column:\s*(\w+)", content)
+        
+        if target_table_match and target_column_match:
+            doc_target_table = target_table_match.group(1)
+            doc_target_column = target_column_match.group(1)
+            
+            # Only include if this document's target matches one of our question targets
+            if (doc_target_table, doc_target_column) in target_pairs:
+                filtered_docs.append(doc)
+    
+    return filtered_docs if filtered_docs else docs  # Fallback to all docs if filtering removes everything
 
 
 def get_upstream_lineage_for_org(org_id: str, question: str, k: int = 8) -> str:
     """
     Extract upstream lineage (what feeds into a target column).
-    Uses retriever + CHAT_LLM with structured prompt to ensure only specific source columns are shown.
+    Uses filtered retrieval + improved prompt to ensure accurate LLM responses without post-processing.
     """
-    retriever = get_retriever(org_id, k=k)
+    # Extract targets first to enable filtering
+    targets = _extract_targets_from_question(question)
+    
+    # Retrieve documents
+    retriever = get_retriever(org_id, k=k * 2)  # Retrieve more, then filter
     docs = retriever.get_relevant_documents(question)
     
-    snippets_text = _docs_to_snippets(docs) if docs else "(no snippets found)"
+    # CRITICAL: Filter documents to only include those matching our targets
+    # This prevents the LLM from seeing irrelevant information
+    filtered_docs = _filter_docs_by_targets(docs, targets)
     
-    # Use CHAT_LLM with structured prompt
-    prompt = UPSTREAM_LINEAGE_PROMPT.format(question=question, snippets=snippets_text)
-    response = CHAT_LLM.invoke(prompt)
+    # Validate that we have documents
+    if not filtered_docs or len(filtered_docs) == 0:
+        return f"NO DATA FOUND: No lineage information available in the knowledge base for the requested column. Please verify the column name and ensure lineage data has been ingested."
+    
+    snippets_text = _docs_to_snippets(filtered_docs)
+    
+    # Build enhanced prompt with target information - make it very clear how many targets
+    target_count = len([t for t in targets if t[2] and t[3]])  # Count targets with table and column
+    target_info = ""
+    if target_count == 0:
+        target_info = "See question for target details."
+    elif target_count == 1:
+        # Single target - make it very clear
+        for target_db, target_schema, target_table, target_column in targets:
+            if target_table and target_column:
+                if target_db and target_schema:
+                    target_info = f"ONE target: {target_db}.{target_schema}.{target_table}.{target_column}"
+                else:
+                    target_info = f"ONE target: {target_table}.{target_column}"
+                break
+    else:
+        # Multiple targets
+        target_info = f"{target_count} targets:\n"
+        for idx, (target_db, target_schema, target_table, target_column) in enumerate(targets, 1):
+            if target_table and target_column:
+                if target_db and target_schema:
+                    target_info += f"{idx}. {target_db}.{target_schema}.{target_table}.{target_column}\n"
+                else:
+                    target_info += f"{idx}. {target_table}.{target_column}\n"
+    
+    enhanced_prompt = UPSTREAM_LINEAGE_PROMPT.format(
+        question=question,
+        snippets=snippets_text,
+        target_info=target_info
+    )
+    
+    # Use CHAT_LLM with enhanced prompt
+    response = CHAT_LLM.invoke(enhanced_prompt)
     answer = response.content if hasattr(response, "content") else str(response)
     
-    # Post-process to ensure specificity
-    if answer:
-        # Check if answer lists too many columns (might be including all columns from a table)
-        lines = [line.strip() for line in answer.split('\n') if line.strip()]
-        column_lines = [line for line in lines if ('`' in line or '.' in line) and any(c.isalnum() for c in line)]
-        
-        # If we have many columns, add a note to verify
-        if len(column_lines) > 3:
-            answer = f"{answer}\n\n⚠️ Note: Please verify that each listed column has an explicit dependency relationship with the target column. Only columns that directly feed into the target should be included."
-    
-    # Add source previews
+    # Add source previews only if we have actual data
     previews: List[str] = []
-    for doc in docs[:3]:  # Limit to first 3 for brevity
+    for doc in filtered_docs[:3]:  # Limit to first 3 for brevity
         preview = (doc.page_content or "").strip()[:200]
         if preview:
             previews.append(preview)
@@ -526,8 +906,19 @@ def get_lineage_answer_for_org(org_id: str, question: str, k: int = 8, original_
             qa = get_qa_chain(org_id=org_id, k=k)
             result: Dict[str, Any] = qa.invoke({"query": question})
             answer = result.get("result", "") or result.get("answer", "")
+            source_docs = result.get("source_documents", []) or []
+            
+            # Validate that we have source documents
+            if not source_docs or len(source_docs) == 0:
+                return "NO DATA FOUND: No lineage information available in the knowledge base for this query. Please verify the column/table names and ensure lineage data has been ingested."
+            
+            # Check if answer is generic or doesn't contain actual lineage information
+            answer_lower = answer.lower() if answer else ""
+            if not answer or len(answer.strip()) < 20:
+                return "NO DATA FOUND: No specific lineage information found for this query in the knowledge base."
+            
             previews: List[str] = []
-            for doc in result.get("source_documents", []) or []:
+            for doc in source_docs[:3]:  # Limit to first 3
                 preview = (getattr(doc, "page_content", "") or "").splitlines()[:5]
                 if preview:
                     previews.append("\n".join(preview))
@@ -538,9 +929,25 @@ def get_lineage_answer_for_org(org_id: str, question: str, k: int = 8, original_
     qa = get_qa_chain(org_id=org_id, k=k)
     result: Dict[str, Any] = qa.invoke({"query": question})
     answer = result.get("result", "") or result.get("answer", "")
+    source_docs = result.get("source_documents", []) or []
+
+    # Validate that we have source documents
+    if not source_docs or len(source_docs) == 0:
+        return "NO DATA FOUND: No lineage information available in the knowledge base for this query. Please verify the column/table names and ensure lineage data has been ingested."
+    
+    # Check if answer is generic or doesn't contain actual lineage information
+    answer_lower = answer.lower() if answer else ""
+    if not answer or len(answer.strip()) < 20:
+        return "NO DATA FOUND: No specific lineage information found for this query in the knowledge base."
+    
+    # Check if answer contains actual column/table references
+    import re
+    has_column_refs = bool(re.search(r'\w+\.\w+', answer))  # Check for table.column pattern
+    if not has_column_refs and ("no" in answer_lower or "not found" in answer_lower or "unable" in answer_lower):
+        return "NO DATA FOUND: No lineage information available for this query in the knowledge base."
 
     previews: List[str] = []
-    for doc in result.get("source_documents", []) or []:
+    for doc in source_docs[:3]:  # Limit to first 3
         preview = (getattr(doc, "page_content", "") or "").splitlines()[:5]
         if preview:
             previews.append("\n".join(preview))
