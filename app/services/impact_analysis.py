@@ -177,6 +177,10 @@ def store_pr_analysis(
     repo_full_name: str,
     pr_number: int,
     pr_title: Optional[str],
+    pr_description: Optional[str] = None,
+    branch_name: Optional[str] = None,
+    author_name: Optional[str] = None,
+    total_impacted_queries: Optional[int] = None,
     analysis_data: Dict,
 ) -> str:
     """
@@ -204,6 +208,15 @@ def store_pr_analysis(
         .first()
     )
 
+    # If total_impacted_queries not provided, calculate from analysis_data
+    if total_impacted_queries is None:
+        all_query_ids = set()
+        files = analysis_data.get("files", [])
+        for file_data in files:
+            affected_ids = file_data.get("affected_query_ids", [])
+            all_query_ids.update(affected_ids)
+        total_impacted_queries = len(all_query_ids)
+
     analysis = GitHubPullRequestAnalysis(
         org_id=installation.org_id,
         installation_id=installation.id,
@@ -211,6 +224,10 @@ def store_pr_analysis(
         repo_full_name=repo_full_name,
         pr_number=pr_number,
         pr_title=pr_title,
+        pr_description=pr_description,
+        branch_name=branch_name,
+        author_name=author_name,
+        total_impacted_queries=total_impacted_queries,
         analysis_data=analysis_data,
     )
     db.add(analysis)
