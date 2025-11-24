@@ -551,6 +551,8 @@ async def github_webhook(request: Request, db=Depends(get_db)):
     pr_number = pr_data.get("number")
     pr_title = pr_data.get("title")
     pr_body = pr_data.get("body")
+    branch_name = pr_data.get("head", {}).get("ref")  # Branch name from PR head
+    author_name = pr_data.get("user", {}).get("login")  # PR author username
     repo_full_name = repo_data.get("full_name")
     installation_id = str(installation_data.get("id"))
 
@@ -641,6 +643,12 @@ async def github_webhook(request: Request, db=Depends(get_db)):
 
         comment_text = f"## 🤖 **Impact Analysis Summary**\n\nAnalyzed {len(results)} SQL file(s) for potential downstream impact.\n\n*Analysis generated at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC*\n\n---\n\n{chr(10).join(file_summaries)}"
 
+        # Calculate total impacted queries (unique query IDs across all files)
+        all_affected_query_ids = set()
+        for r in results:
+            all_affected_query_ids.update(r.get("affected_query_ids", []))
+        total_impacted_queries = len(all_affected_query_ids)
+
         # Store results
         # New: store results via SQLAlchemy model with relationships
         analysis_id = store_pr_analysis(
@@ -650,6 +658,10 @@ async def github_webhook(request: Request, db=Depends(get_db)):
             repo_full_name=repo_full_name,
             pr_number=pr_number,
             pr_title=pr_title,
+            pr_description=pr_body,
+            branch_name=branch_name,
+            author_name=author_name,
+            total_impacted_queries=total_impacted_queries,
             analysis_data={"files": results},
         )
 

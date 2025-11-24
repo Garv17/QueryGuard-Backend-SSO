@@ -7,7 +7,7 @@ from app.utils.models import SnowflakeConnection, SnowflakeJob
 from app.utils.websocket_manager import websocket_manager
 import threading
 import asyncio
-from app.api import auth, organizations, snowflake, github, jira, impact, dbt_cloud, chat, users
+from app.api import auth, organizations, snowflake, github, jira, impact, dbt_cloud, chat, users, overview_dashboard
 from scripts import init_product_support_admin
 import logging
 import sys
@@ -124,6 +124,7 @@ app.include_router(jira.router)
 app.include_router(impact.router)
 app.include_router(dbt_cloud.router)
 app.include_router(chat.router)
+app.include_router(overview_dashboard.router)
 # TEMPORARY: Initialization endpoint - remove after setup
 app.include_router(init_product_support_admin.router)
 
