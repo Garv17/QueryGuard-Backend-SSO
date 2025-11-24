@@ -180,6 +180,7 @@ def store_pr_analysis(
     pr_description: Optional[str] = None,
     branch_name: Optional[str] = None,
     author_name: Optional[str] = None,
+    pr_url: Optional[str] = None,
     total_impacted_queries: Optional[int] = None,
     analysis_data: Dict,
 ) -> str:
@@ -227,6 +228,7 @@ def store_pr_analysis(
         pr_description=pr_description,
         branch_name=branch_name,
         author_name=author_name,
+        pr_url=pr_url,
         total_impacted_queries=total_impacted_queries,
         analysis_data=analysis_data,
     )

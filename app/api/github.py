@@ -100,6 +100,11 @@ class PRAAnalysisResponse(BaseModel):
     repo_full_name: str
     pr_number: int
     pr_title: str | None
+    pr_description: str | None
+    branch_name: str | None
+    author_name: str | None
+    pr_url: str | None
+    total_impacted_queries: int | None
     analysis_data: dict
     created_at: datetime
     updated_at: datetime | None
@@ -553,6 +558,7 @@ async def github_webhook(request: Request, db=Depends(get_db)):
     pr_body = pr_data.get("body")
     branch_name = pr_data.get("head", {}).get("ref")  # Branch name from PR head
     author_name = pr_data.get("user", {}).get("login")  # PR author username
+    pr_url = pr_data.get("html_url")  # GitHub PR URL
     repo_full_name = repo_data.get("full_name")
     installation_id = str(installation_data.get("id"))
 
@@ -661,6 +667,7 @@ async def github_webhook(request: Request, db=Depends(get_db)):
             pr_description=pr_body,
             branch_name=branch_name,
             author_name=author_name,
+            pr_url=pr_url,
             total_impacted_queries=total_impacted_queries,
             analysis_data={"files": results},
         )
