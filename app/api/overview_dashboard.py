@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from sqlalchemy.orm import Session
+from uuid import UUID
 from app.utils.auth_deps import get_current_user
 from app.utils.models import User, GitHubPullRequestAnalysis
 from app.database import get_db
@@ -12,6 +13,7 @@ logger = logging.getLogger("overview_dashboard")
 
 # --- Response Models ---
 class PullRequestSummary(BaseModel):
+    analysis_id: UUID
     pr_id: str
     title: str
     description: Optional[str] = ""
@@ -89,6 +91,7 @@ def get_dashboard_overview(
         
         pull_requests.append(
             PullRequestSummary(
+                analysis_id=pr.id,
                 pr_id=f"PR-{pr.pr_number}",
                 title=pr.pr_title or "",
                 description=pr.pr_description or "",
