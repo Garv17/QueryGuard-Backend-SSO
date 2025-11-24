@@ -254,6 +254,7 @@ async def chat_with_llm(
             llm=CHAT_LLM,
             agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             verbose=True,
+            handle_parsing_errors=True,
         )
 
         # Strong guidance to the agent on tool selection and output format
@@ -283,12 +284,32 @@ async def chat_with_llm(
         )
         agent_query = f"{guidance}{preferred_hint}\nUser question: {query}"
 
-        agent_result = agent.invoke(agent_query)
-        # LangChain agents often return dicts with `output`; fallback to str
-        if isinstance(agent_result, dict) and "output" in agent_result:
-            response_text = agent_result.get("output", "")
-        else:
-            response_text = str(agent_result)
+        try:
+            agent_result = agent.invoke(agent_query)
+            # LangChain agents often return dicts with `output`; fallback to str
+            if isinstance(agent_result, dict) and "output" in agent_result:
+                response_text = agent_result.get("output", "")
+            else:
+                response_text = str(agent_result)
+        except ValueError as e:
+            # Handle parsing errors - extract the actual response from the error if possible
+            error_msg = str(e)
+            if "Could not parse LLM output" in error_msg:
+                # Try to extract the response from the error message
+                # The error format is: "Could not parse LLM output: `...response...`"
+                import re
+                # Find text after "Could not parse LLM output: `" and extract until the last backtick before "For troubleshooting"
+                match = re.search(r"Could not parse LLM output: `(.*?)(?:`\s*For troubleshooting|$)", error_msg, re.DOTALL)
+                if match:
+                    response_text = match.group(1).strip()
+                    # Clean up common prefixes that the agent might add
+                    response_text = re.sub(r"^I now know the final answer\.\s*", "", response_text, flags=re.IGNORECASE)
+                    logger.warning(f"Agent parsing error handled, extracted response: {response_text[:100]}...")
+                else:
+                    response_text = "I encountered an issue formatting my response. Please try rephrasing your question."
+                    logger.error(f"Agent parsing error: {error_msg}")
+            else:
+                raise
 
         # Best-effort: extract query IDs from the response text and fetch full queries
         impacted_query_ids: List[str] = []
@@ -1094,6 +1115,7 @@ async def handle_chat_message(
                         llm=CHAT_LLM,
                         agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
                         verbose=True,
+                        handle_parsing_errors=True,
                     )
 
                     # Strong guidance to the agent on tool selection and output format
@@ -1129,12 +1151,32 @@ async def handle_chat_message(
                     )
                     agent_query = f"{guidance}{preferred_hint}\nUser question: {query}"
 
-                    agent_result = agent.invoke(agent_query)
-                    # LangChain agents often return dicts with `output`; fallback to str
-                    if isinstance(agent_result, dict) and "output" in agent_result:
-                        response_text = agent_result.get("output", "")
-                    else:
-                        response_text = str(agent_result)
+                    try:
+                        agent_result = agent.invoke(agent_query)
+                        # LangChain agents often return dicts with `output`; fallback to str
+                        if isinstance(agent_result, dict) and "output" in agent_result:
+                            response_text = agent_result.get("output", "")
+                        else:
+                            response_text = str(agent_result)
+                    except ValueError as e:
+                        # Handle parsing errors - extract the actual response from the error if possible
+                        error_msg = str(e)
+                        if "Could not parse LLM output" in error_msg:
+                            # Try to extract the response from the error message
+                            # The error format is: "Could not parse LLM output: `...response...`"
+                            import re
+                            # Find text after "Could not parse LLM output: `" and extract until the last backtick before "For troubleshooting"
+                            match = re.search(r"Could not parse LLM output: `(.*?)(?:`\s*For troubleshooting|$)", error_msg, re.DOTALL)
+                            if match:
+                                response_text = match.group(1).strip()
+                                # Clean up common prefixes that the agent might add
+                                response_text = re.sub(r"^I now know the final answer\.\s*", "", response_text, flags=re.IGNORECASE)
+                                logger.warning(f"Agent parsing error handled, extracted response: {response_text[:100]}...")
+                            else:
+                                response_text = "I encountered an issue formatting my response. Please try rephrasing your question."
+                                logger.error(f"Agent parsing error: {error_msg}")
+                        else:
+                            raise
 
                     # Best-effort: extract query IDs from the response text and fetch full queries
                     impacted_query_ids: List[str] = []
