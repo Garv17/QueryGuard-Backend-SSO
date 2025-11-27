@@ -201,6 +201,19 @@ async def chat_with_llm(
         )
         if not CHAT_LLM:
             raise HTTPException(status_code=500, detail="OpenAI API key not configured for chatbot")
+        
+        # Log which LLM is being used
+        actual_model = "unknown"
+        if CHAT_LLM:
+            if hasattr(CHAT_LLM, 'model_name'):
+                actual_model = CHAT_LLM.model_name
+            elif hasattr(CHAT_LLM, 'model'):
+                actual_model = CHAT_LLM.model
+            elif hasattr(CHAT_LLM, '_model_name'):
+                actual_model = CHAT_LLM._model_name
+            llm_class = type(CHAT_LLM).__name__
+            logger.info(f"Using CHAT_LLM ({llm_class}) with model: {actual_model} for message classification")
+        
         classification = CHAT_LLM.invoke(classify_prompt)
         classification_label = (getattr(classification, "content", str(classification)) or "other").strip().lower()
 
@@ -249,6 +262,18 @@ async def chat_with_llm(
         code_suggestion_tool = build_org_code_suggestion_tool(org_id=resolved_org_id)
         jira_tool = build_org_jira_tool(org_id=resolved_org_id, user_id=str(current_user.id))
 
+        # Log which LLM is being used for the agent
+        actual_model = "unknown"
+        if CHAT_LLM:
+            if hasattr(CHAT_LLM, 'model_name'):
+                actual_model = CHAT_LLM.model_name
+            elif hasattr(CHAT_LLM, 'model'):
+                actual_model = CHAT_LLM.model
+            elif hasattr(CHAT_LLM, '_model_name'):
+                actual_model = CHAT_LLM._model_name
+            llm_class = type(CHAT_LLM).__name__
+            logger.info(f"Initializing agent with CHAT_LLM ({llm_class}) using model: {actual_model}")
+        
         agent = initialize_agent(
             tools=[lineage_tool, query_history_tool, pr_repo_tool, code_suggestion_tool, jira_tool],
             llm=CHAT_LLM,
@@ -972,7 +997,20 @@ async def handle_chat_message(
             if not current_user:
                 # Fallback to simple QA chain if no authentication
                 logger.warning(f"No authenticated user for WebSocket chat, using simple QA chain")
-                qa_chain = get_qa_chain(org_id, k=k)
+                
+                # Log which LLM is being used
+                actual_model = "unknown"
+                if CHAT_LLM:
+                    if hasattr(CHAT_LLM, 'model_name'):
+                        actual_model = CHAT_LLM.model_name
+                    elif hasattr(CHAT_LLM, 'model'):
+                        actual_model = CHAT_LLM.model
+                    elif hasattr(CHAT_LLM, '_model_name'):
+                        actual_model = CHAT_LLM._model_name
+                    llm_class = type(CHAT_LLM).__name__
+                    logger.info(f"Using CHAT_LLM ({llm_class}) with model: {actual_model} for WebSocket QA chain")
+                
+                qa_chain = get_qa_chain(org_id, k=k, llm=CHAT_LLM)  # Use CHAT_LLM for chatbot
                 result = qa_chain.invoke({"query": content})
                 
                 response_text = result.get("result", "I'm sorry, I couldn't generate a response.")
@@ -1046,6 +1084,18 @@ async def handle_chat_message(
                 )
                 if not CHAT_LLM:
                     raise Exception("OpenAI API key not configured for chatbot")
+                
+                # Log which LLM is being used
+                actual_model = "unknown"
+                if CHAT_LLM:
+                    if hasattr(CHAT_LLM, 'model_name'):
+                        actual_model = CHAT_LLM.model_name
+                    elif hasattr(CHAT_LLM, 'model'):
+                        actual_model = CHAT_LLM.model
+                    elif hasattr(CHAT_LLM, '_model_name'):
+                        actual_model = CHAT_LLM._model_name
+                    llm_class = type(CHAT_LLM).__name__
+                    logger.info(f"Using CHAT_LLM ({llm_class}) with model: {actual_model} for WebSocket message classification")
                     
                 classification = CHAT_LLM.invoke(classify_prompt)
                 classification_label = (getattr(classification, "content", str(classification)) or "other").strip().lower()
@@ -1110,6 +1160,18 @@ async def handle_chat_message(
                     code_suggestion_tool = build_org_code_suggestion_tool(org_id=resolved_org_id)
                     jira_tool = build_org_jira_tool(org_id=resolved_org_id, user_id=str(current_user.id))
 
+                    # Log which LLM is being used for the agent
+                    actual_model = "unknown"
+                    if CHAT_LLM:
+                        if hasattr(CHAT_LLM, 'model_name'):
+                            actual_model = CHAT_LLM.model_name
+                        elif hasattr(CHAT_LLM, 'model'):
+                            actual_model = CHAT_LLM.model
+                        elif hasattr(CHAT_LLM, '_model_name'):
+                            actual_model = CHAT_LLM._model_name
+                        llm_class = type(CHAT_LLM).__name__
+                        logger.info(f"Initializing WebSocket agent with CHAT_LLM ({llm_class}) using model: {actual_model}")
+                    
                     agent = initialize_agent(
                         tools=[lineage_tool, query_history_tool, pr_repo_tool, code_suggestion_tool, jira_tool],
                         llm=CHAT_LLM,
