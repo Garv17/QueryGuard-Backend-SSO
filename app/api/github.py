@@ -216,14 +216,55 @@ def github_install(org_id: str, request: Request):
 
 @router.get("/callback")
 def github_callback(
-    installation_id: str,
+    installation_id: Optional[str] = None,
     setup_action: Optional[str] = None,
     state: Optional[str] = None,
     code: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """Handle GitHub App installation callback"""
-    logger.info("GitHub callback received installation_id=%s setup_action=%s state=%s", installation_id, setup_action, state)
+    logger.info("GitHub callback received installation_id=%s setup_action=%s state=%s code=%s", installation_id, setup_action, state, code)
+
+    # Handle setup_action=request (pending approval) - GitHub doesn't send installation_id yet
+    if setup_action == "request":
+        logger.info("/github/callback - installation request pending approval (setup_action=request)")
+        if not state:
+            return {"message": "Installation request received but no state parameter - cannot associate with organization"}
+        
+        try:
+            # Validate state (org_id) format
+            normalized_state = unquote(state)
+            if normalized_state.startswith('/'):
+                normalized_state = normalized_state[1:]
+            org_uuid = uuid.UUID(normalized_state)
+            
+            # Check if organization exists
+            organization = db.query(Organization).filter(
+                Organization.id == org_uuid,
+                Organization.is_active == True
+            ).first()
+            
+            if not organization:
+                logger.warning("/github/callback - organization not found for pending request: %s", org_uuid)
+                return {"message": "Organization not found", "status": "error"}
+            
+            return {
+                "message": "GitHub App installation request received. Waiting for organization administrator approval.",
+                "org_id": str(org_uuid),
+                "status": "pending_approval",
+                "setup_action": "request"
+            }
+        except ValueError:
+            logger.warning("/github/callback - invalid state format in request: %s", state)
+            return {"message": "Invalid state parameter", "status": "error"}
+    
+    # For setup_action=install or when installation_id is present, proceed with installation
+    if not installation_id:
+        logger.warning("/github/callback - missing installation_id and setup_action is not 'request'")
+        return {
+            "message": "Installation ID is required for installation completion",
+            "status": "error"
+        }
 
     # If no state parameter, ignore the installation (not from our flow)
     if not state:
