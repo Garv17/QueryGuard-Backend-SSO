@@ -22,6 +22,14 @@ from app.database import get_db, SessionLocal
 from app.tools import build_org_lineage_tool, build_org_query_history_tool, build_org_pr_repo_tool, build_org_code_suggestion_tool, build_org_jira_tool
 from app.vector_db import CHAT_LLM
 from app.services.impact_analysis import fetch_queries
+# PostgresStore long-term memory imports (commented out - not currently in use)
+# from app.utils.memory_store import (
+#     get_user_profile,
+#     search_semantic_memories,
+#     store_semantic_memory,
+#     store_episodic_memory,
+#     get_episodic_memories
+# )
 import logging
 import uuid
 import asyncio
@@ -33,6 +41,126 @@ from sqlalchemy import desc
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+# Configuration for conversation history limits
+# These can be adjusted based on LLM context window and requirements
+# Note: Most modern LLMs have context windows of 8K-128K tokens
+# Adjust these values based on your LLM's context window and desired behavior
+MAX_CONTEXT_MESSAGES = 20  # Maximum number of messages to include in context (default: 20)
+MAX_CONTEXT_TOKENS = 8000  # Approximate max tokens for context (rough estimate: 1 token ≈ 4 chars)
+CONTEXT_MESSAGE_ESTIMATE = 200  # Estimated tokens per message (rough estimate, not used but kept for reference)
+
+def estimate_tokens(text: str) -> int:
+    """
+    Rough estimation of token count (1 token ≈ 4 characters).
+    This is a simple heuristic; for accurate counts, use tiktoken or similar.
+    """
+    return len(text) // 4
+
+def load_conversation_history(
+    thread_id: str,
+    user_id: str,
+    org_id: str,
+    db: Session,
+    max_messages: Optional[int] = None,
+    max_tokens: Optional[int] = None
+) -> List[Dict[str, str]]:
+    """
+    Load conversation history from database for a given thread.
+    Returns a list of messages in format [{"role": "user|assistant", "content": "..."}]
+    
+    Args:
+        thread_id: Thread ID to load history for
+        user_id: User ID (for security validation)
+        org_id: Organization ID (for security validation)
+        db: Database session
+        max_messages: Maximum number of messages to return (default: MAX_CONTEXT_MESSAGES)
+        max_tokens: Maximum approximate tokens to include (default: MAX_CONTEXT_TOKENS)
+        
+    Returns:
+        List of message dicts with role and content, ordered chronologically
+    """
+    if not thread_id:
+        return []
+    
+    try:
+        thread_uuid = uuid.UUID(thread_id)
+    except ValueError:
+        logger.warning(f"Invalid thread_id format: {thread_id}")
+        return []
+    
+    # Validate thread belongs to user and org
+    thread = db.query(ChatThread).filter(
+        ChatThread.id == thread_uuid,
+        ChatThread.user_id == uuid.UUID(user_id),
+        ChatThread.org_id == uuid.UUID(org_id),
+        ChatThread.is_active == True
+    ).first()
+    
+    if not thread:
+        logger.warning(f"Thread {thread_id} not found or access denied for user {user_id}")
+        return []
+    
+    # Load messages ordered by creation time
+    messages = db.query(ChatMessage).filter(
+        ChatMessage.thread_id == thread_uuid
+    ).order_by(ChatMessage.created_at).all()
+    
+    if not messages:
+        return []
+    
+    # Convert to list of dicts
+    history = []
+    for msg in messages:
+        history.append({
+            "role": msg.role,
+            "content": msg.content
+        })
+    
+    # Apply limits
+    max_msgs = max_messages or MAX_CONTEXT_MESSAGES
+    max_toks = max_tokens or MAX_CONTEXT_TOKENS
+    
+    # First, limit by message count (take most recent N messages)
+    if len(history) > max_msgs:
+        history = history[-max_msgs:]
+    
+    # Then, limit by token count (remove oldest messages if needed)
+    total_tokens = 0
+    if max_toks:
+        total_tokens = sum(estimate_tokens(msg["content"]) for msg in history)
+        while total_tokens > max_toks and len(history) > 1:
+            # Remove oldest message
+            removed = history.pop(0)
+            total_tokens -= estimate_tokens(removed["content"])
+    else:
+        # Calculate tokens even if not limiting by them (for logging)
+        total_tokens = sum(estimate_tokens(msg["content"]) for msg in history)
+    
+    logger.info(f"Loaded {len(history)} messages from thread {thread_id} (estimated {total_tokens} tokens)")
+    return history
+
+def format_conversation_context(history: List[Dict[str, str]]) -> str:
+    """
+    Format conversation history into a context string for the LLM.
+    Uses a format compatible with most chat models (User/Assistant format).
+    
+    Args:
+        history: List of message dicts with role and content
+        
+    Returns:
+        Formatted context string ready to be included in LLM prompt
+    """
+    if not history:
+        return ""
+    
+    context_parts = []
+    for msg in history:
+        role_label = "User" if msg["role"] == "user" else "Assistant"
+        # Format: "User: message content" or "Assistant: message content"
+        context_parts.append(f"{role_label}: {msg['content']}")
+    
+    return "\n".join(context_parts)
 
 # Helper functions for chat history
 def get_or_create_thread(thread_id: Optional[str], user_id: str, org_id: str, db: Session) -> ChatThread:
@@ -174,22 +302,41 @@ async def chat_with_llm(
         
         # Get or create thread if thread_id provided
         db_thread = None
+        conversation_history = []
         if thread_id:
             try:
                 db_thread = get_or_create_thread(thread_id, str(current_user.id), str(current_user.org_id), db)
                 thread_id = str(db_thread.id)
                 # Save user message
                 save_user_message(thread_id, str(current_user.id), str(current_user.org_id), request.message, db)
+                
+                # Load conversation history from database (excluding the message we just saved)
+                # This provides long-term memory across sessions
+                conversation_history = load_conversation_history(
+                    thread_id=thread_id,
+                    user_id=str(current_user.id),
+                    org_id=str(current_user.org_id),
+                    db=db
+                )
+                # Remove the last message (the one we just saved) from history for context
+                # We'll add it back in the query, but we want previous context
+                if conversation_history and conversation_history[-1]["role"] == "user":
+                    conversation_history = conversation_history[:-1]
             except Exception as e:
-                logger.error(f"Error saving user message: {str(e)}")
+                logger.error(f"Error saving user message or loading history: {str(e)}")
         
-        # Prepare the query with conversation context if provided
+        # Use provided conversation_history if no database history, otherwise use database history
+        # Database history takes precedence as it's the source of truth
+        if not conversation_history and request.conversation_history:
+            conversation_history = [{"role": msg.role, "content": msg.content} for msg in request.conversation_history]
+        
+        # Prepare the query with conversation context
         query = request.message
-        if request.conversation_history:
-            context_messages = [f"{msg.role}: {msg.content}" for msg in request.conversation_history[-5:]]
-            if context_messages:
-                context = "\n".join(context_messages)
+        if conversation_history:
+            context = format_conversation_context(conversation_history)
+            if context:
                 query = f"Previous conversation context:\n{context}\n\nCurrent question: {request.message}"
+                logger.info(f"Added conversation context: {len(conversation_history)} messages")
         
         # LLM classification: decide whether to use tools (lineage/impact) or respond conversationally (other)
         classify_prompt = (
@@ -283,10 +430,22 @@ async def chat_with_llm(
         )
 
         # Strong guidance to the agent on tool selection and output format
+        # Include conversation awareness if we have history
+        conversation_note = ""
+        if conversation_history:
+            conversation_note = (
+                "\nCONVERSATION CONTEXT:\n"
+                "- You are continuing an ongoing conversation. Use the previous conversation context to understand references, "
+                "follow-up questions, and maintain continuity.\n"
+                "- If the user refers to something mentioned earlier (e.g., 'that table', 'the previous query'), "
+                "use the conversation context to understand what they mean.\n"
+            )
+        
         guidance = (
             "SYSTEM ROLE: You are Zane AI, an assistant that helps analyze data lineage and change impacts.\n"
             "BEHAVIOR:\n"
             "- Be concise and helpful.\n"
+            f"{conversation_note}"
             "- If the user greets you (e.g., 'hi', 'hello'), respond with a short intro of who you are and how you can help (lineage Q&A, query impact analysis, PR analysis, code suggestions, and Jira ticket creation).\n"
             "- If the question is about schema/column changes or 'impacted queries', you MUST use the query_history_search tool.\n"
             "- When reporting impacted queries, return a concise, numbered list with a short SQL preview for each query, not just IDs.\n"
@@ -386,6 +545,28 @@ async def chat_with_llm(
                     message_metadata,
                     db
                 )
+                
+                # Episodic memory storage (PostgresStore) - commented out for now
+                # Can be enabled when PostgresStore is properly configured
+                # try:
+                #     if thread_id:
+                #         episodic_memory = {
+                #             "user_message": request.message,
+                #             "assistant_response": response_text[:500],
+                #             "timestamp": datetime.utcnow().isoformat(),
+                #             "classification": classification_label,
+                #             "has_tool_results": bool(impacted_queries or pr_repo_data or code_suggestions or jira_ticket)
+                #         }
+                #         memory_key = f"episode_{datetime.utcnow().timestamp()}"
+                #         store_episodic_memory(
+                #             thread_id=thread_id,
+                #             user_id=str(current_user.id),
+                #             org_id=resolved_org_id,
+                #             memory_key=memory_key,
+                #             memory_data=episodic_memory
+                #         )
+                # except Exception as e:
+                #     logger.warning(f"Error storing episodic memory: {str(e)} (non-critical)")
             except Exception as e:
                 logger.error(f"Error saving assistant message: {str(e)}")
         
@@ -926,6 +1107,7 @@ async def handle_chat_message(
         
         # Get or create thread if user is authenticated
         db_thread = None
+        conversation_history = []
         if current_user and message_thread_id:
             db = SessionLocal()
             try:
@@ -933,8 +1115,20 @@ async def handle_chat_message(
                 message_thread_id = str(db_thread.id)
                 # Save user message
                 save_user_message(message_thread_id, str(current_user.id), str(current_user.org_id), content, db)
+                
+                # Load conversation history from database (excluding the message we just saved)
+                # This provides long-term memory across sessions
+                conversation_history = load_conversation_history(
+                    thread_id=message_thread_id,
+                    user_id=str(current_user.id),
+                    org_id=str(current_user.org_id),
+                    db=db
+                )
+                # Remove the last message (the one we just saved) from history for context
+                if conversation_history and conversation_history[-1]["role"] == "user":
+                    conversation_history = conversation_history[:-1]
             except Exception as e:
-                logger.error(f"Error saving user message: {str(e)}")
+                logger.error(f"Error saving user message or loading history: {str(e)}")
             finally:
                 db.close()
         elif current_user and not message_thread_id:
@@ -998,6 +1192,18 @@ async def handle_chat_message(
                 # Fallback to simple QA chain if no authentication
                 logger.warning(f"No authenticated user for WebSocket chat, using simple QA chain")
                 
+                # Use client-provided conversation history if available (no database access without auth)
+                client_history = message_data.get("conversation_history", [])
+                query_with_context = content
+                if client_history:
+                    history_list = [
+                        {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+                        for msg in client_history
+                    ]
+                    context = format_conversation_context(history_list)
+                    if context:
+                        query_with_context = f"Previous conversation context:\n{context}\n\nCurrent question: {content}"
+                
                 # Log which LLM is being used
                 actual_model = "unknown"
                 if CHAT_LLM:
@@ -1011,7 +1217,7 @@ async def handle_chat_message(
                     logger.info(f"Using CHAT_LLM ({llm_class}) with model: {actual_model} for WebSocket QA chain")
                 
                 qa_chain = get_qa_chain(org_id, k=k, llm=CHAT_LLM)  # Use CHAT_LLM for chatbot
-                result = qa_chain.invoke({"query": content})
+                result = qa_chain.invoke({"query": query_with_context})
                 
                 response_text = result.get("result", "I'm sorry, I couldn't generate a response.")
                 source_documents = result.get("source_documents", [])
@@ -1065,14 +1271,23 @@ async def handle_chat_message(
                 # Resolve organization strictly from authenticated user
                 resolved_org_id = str(current_user.org_id)
                 
-                # Prepare the query with conversation context if provided
+                # Prepare the query with conversation context
+                # Use database-loaded history if available, otherwise fall back to client-provided history
+                if not conversation_history:
+                    client_history = message_data.get("conversation_history", [])
+                    if client_history:
+                        conversation_history = [
+                            {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+                            for msg in client_history
+                        ]
+                
+                # Prepare the query with conversation context
                 query = content
-                conversation_history = message_data.get("conversation_history", [])
                 if conversation_history:
-                    context_messages = [f"{msg.get('role', 'user')}: {msg.get('content', '')}" for msg in conversation_history[-5:]]
-                    if context_messages:
-                        context = "\n".join(context_messages)
+                    context = format_conversation_context(conversation_history)
+                    if context:
                         query = f"Previous conversation context:\n{context}\n\nCurrent question: {content}"
+                        logger.info(f"Added conversation context: {len(conversation_history)} messages")
                 
                 # LLM classification: decide whether to use tools (lineage/impact) or respond conversationally (other)
                 classify_prompt = (
@@ -1181,10 +1396,22 @@ async def handle_chat_message(
                     )
 
                     # Strong guidance to the agent on tool selection and output format
+                    # Include conversation awareness if we have history
+                    conversation_note = ""
+                    if conversation_history:
+                        conversation_note = (
+                            "\nCONVERSATION CONTEXT:\n"
+                            "- You are continuing an ongoing conversation. Use the previous conversation context to understand references, "
+                            "follow-up questions, and maintain continuity.\n"
+                            "- If the user refers to something mentioned earlier (e.g., 'that table', 'the previous query'), "
+                            "use the conversation context to understand what they mean.\n"
+                        )
+                    
                     guidance = (
                         "SYSTEM ROLE: You are Zane AI, an assistant that helps analyze data lineage and change impacts.\n"
                         "BEHAVIOR:\n"
                         "- Be concise and helpful.\n"
+                        f"{conversation_note}"
                         "- CRITICAL: If a tool returns 'NO DATA FOUND' or indicates no data is available, you MUST tell the user that no data was found. DO NOT make up or assume information.\n"
                         "- CRITICAL: If the create_jira_ticket tool returns 'JIRA CONNECTION NOT CONFIGURED' or 'JIRA ERROR', you MUST inform the user that Jira is not set up. DO NOT try other tools - this is a configuration issue, not a data issue.\n"
                         "- DO NOT hallucinate lineage relationships, impacted queries, or any data that isn't explicitly returned by the tools.\n"
@@ -1297,6 +1524,27 @@ async def handle_chat_message(
                                 message_metadata,
                                 db
                             )
+                            
+                            # Episodic memory storage (PostgresStore) - commented out for now
+                            # Can be enabled when PostgresStore is properly configured
+                            # try:
+                            #     episodic_memory = {
+                            #         "user_message": content,
+                            #         "assistant_response": response_text[:500],
+                            #         "timestamp": datetime.utcnow().isoformat(),
+                            #         "classification": classification_label,
+                            #         "has_tool_results": bool(impacted_queries or pr_repo_data or code_suggestions or jira_ticket)
+                            #     }
+                            #     memory_key = f"episode_{datetime.utcnow().timestamp()}"
+                            #     store_episodic_memory(
+                            #         thread_id=message_thread_id,
+                            #         user_id=str(current_user.id),
+                            #         org_id=resolved_org_id,
+                            #         memory_key=memory_key,
+                            #         memory_data=episodic_memory
+                            #     )
+                            # except Exception as e:
+                            #     logger.warning(f"Error storing episodic memory: {str(e)} (non-critical)")
                         except Exception as e:
                             logger.error(f"Error saving assistant message: {str(e)}")
                         finally:
