@@ -15,7 +15,7 @@ from pydantic import BaseModel
 import json
 import requests
 from app.database import get_db
-from app.utils.models import GitHubInstallation, GitHubRepository, Organization, User, GitHubPullRequestAnalysis
+from app.utils.models import GitHubInstallation, GitHubRepository, Organization, User, GitHubPullRequestAnalysis, ColumnLevelLineage
 from app.utils.auth_deps import get_current_user
 from app.utils.rbac import require_connector_access
 import uuid
@@ -24,9 +24,9 @@ from datetime import datetime
 import os
 import logging
 from urllib.parse import unquote
-from app.services.impact_analysis import schema_detection_rag, dbt_model_detection_rag, fetch_queries, store_pr_analysis
+from app.services.impact_analysis import schema_detection_rag, dbt_model_detection_rag, fetch_queries, store_pr_analysis, parse_schema_change
 from github import GithubIntegration, Github
-from sqlalchemy import and_
+from sqlalchemy import and_, or_, func
 
 router = APIRouter(prefix="/github", tags=["GitHub"])
 
@@ -194,6 +194,100 @@ def add_comment_to_pr(access_token: str, repo_full_name: str, pr_number: int, co
     )
     
     return response.status_code == 201
+
+
+def get_upstream_lineage(
+    db: Session,
+    org_id: UUID,
+    target_database: Optional[str],
+    target_schema: Optional[str],
+    target_table: str,
+    target_column: Optional[str] = None
+) -> List[dict]:
+    """
+    Query upstream lineage (what feeds into the target table/column).
+    Returns all source columns that feed into the specified target.
+    Uses case-insensitive matching for table/column names.
+    """
+    query = db.query(ColumnLevelLineage).filter(
+        ColumnLevelLineage.org_id == org_id,
+        ColumnLevelLineage.is_active == 1,
+        func.lower(ColumnLevelLineage.target_table) == func.lower(target_table)
+    )
+    
+    if target_database:
+        query = query.filter(func.lower(ColumnLevelLineage.target_database) == func.lower(target_database))
+    if target_schema:
+        query = query.filter(func.lower(ColumnLevelLineage.target_schema) == func.lower(target_schema))
+    if target_column:
+        query = query.filter(func.lower(ColumnLevelLineage.target_column) == func.lower(target_column))
+    
+    lineage_records = query.all()
+    
+    result = []
+    for record in lineage_records:
+        result.append({
+            "source_database": record.source_database,
+            "source_schema": record.source_schema,
+            "source_table": record.source_table,
+            "source_column": record.source_column,
+            "target_database": record.target_database,
+            "target_schema": record.target_schema,
+            "target_table": record.target_table,
+            "target_column": record.target_column,
+            "query_id": record.query_id,
+            "query_type": record.query_type,
+            "dbt_model_file_path": record.dbt_model_file_path,
+        })
+    
+    return result
+
+
+def get_downstream_lineage(
+    db: Session,
+    org_id: UUID,
+    source_database: Optional[str],
+    source_schema: Optional[str],
+    source_table: str,
+    source_column: Optional[str] = None
+) -> List[dict]:
+    """
+    Query downstream lineage (what the source table/column feeds into).
+    Returns all target columns that depend on the specified source.
+    Uses case-insensitive matching for table/column names.
+    """
+    query = db.query(ColumnLevelLineage).filter(
+        ColumnLevelLineage.org_id == org_id,
+        ColumnLevelLineage.is_active == 1,
+        func.lower(ColumnLevelLineage.source_table) == func.lower(source_table)
+    )
+    
+    if source_database:
+        query = query.filter(func.lower(ColumnLevelLineage.source_database) == func.lower(source_database))
+    if source_schema:
+        query = query.filter(func.lower(ColumnLevelLineage.source_schema) == func.lower(source_schema))
+    if source_column:
+        query = query.filter(func.lower(ColumnLevelLineage.source_column) == func.lower(source_column))
+    
+    lineage_records = query.all()
+    
+    result = []
+    for record in lineage_records:
+        result.append({
+            "source_database": record.source_database,
+            "source_schema": record.source_schema,
+            "source_table": record.source_table,
+            "source_column": record.source_column,
+            "target_database": record.target_database,
+            "target_schema": record.target_schema,
+            "target_table": record.target_table,
+            "target_column": record.target_column,
+            "query_id": record.query_id,
+            "query_type": record.query_type,
+            "dbt_model_file_path": record.dbt_model_file_path,
+        })
+    
+    return result
 
 
 # --- Endpoints ---
@@ -784,7 +878,7 @@ def process_pr_changes(pr_request: PRProcessRequest, current_user: User = Depend
 
 @router.get("/analyses/{analysis_id}", response_model=PRAAnalysisResponse)
 def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Fetch stored PR analysis by its UUID"""
+    """Fetch stored PR analysis by its UUID with enhanced lineage data"""
     try:
         analysis_uuid = uuid.UUID(analysis_id)
     except ValueError:
@@ -801,4 +895,98 @@ def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_u
     if analysis.org_id != current_user.org_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
+    # Enhance analysis_data with lineage information
+    if analysis.analysis_data and "files" in analysis.analysis_data:
+        enhanced_files = []
+        
+        for file_data in analysis.analysis_data["files"]:
+            enhanced_file = file_data.copy()
+            
+            # Parse SQL change to extract table and column information
+            sql_change = file_data.get("sql_change", "")
+            parsed_change = parse_schema_change(sql_change)
+            
+            # Extract table and column info
+            changed_table = parsed_change.get("table_name")
+            changed_column = parsed_change.get("column_name")
+            changed_database = parsed_change.get("database")
+            changed_schema = parsed_change.get("schema")
+            
+            # Add is_impacted flag to source_metadata
+            source_metadata = file_data.get("source_metadata", [])
+            enhanced_source_metadata = []
+            
+            # Get the changed column name (normalized)
+            changed_column_lower = changed_column.lower() if changed_column else None
+            
+            for metadata_entry in source_metadata:
+                enhanced_entry = metadata_entry.copy()
+                # Flag entries where the target column is directly impacted
+                # This is already in source_metadata, so we mark them as impacted
+                enhanced_entry["is_impacted"] = True
+                enhanced_source_metadata.append(enhanced_entry)
+            
+            enhanced_file["source_metadata"] = enhanced_source_metadata
+            
+            # Get complete lineage data if we have table information
+            complete_lineage = {
+                "upstream": [],
+                "downstream": []
+            }
+            
+            if changed_table:
+                # Get upstream lineage (what feeds into the changed table)
+                # Query by table name primarily, database/schema are optional filters
+                upstream_lineage = get_upstream_lineage(
+                    db=db,
+                    org_id=analysis.org_id,
+                    target_database=None,  # Query all databases for this table
+                    target_schema=None,   # Query all schemas for this table
+                    target_table=changed_table,
+                    target_column=changed_column
+                )
+                complete_lineage["upstream"] = upstream_lineage
+                
+                # Get downstream lineage (what the changed table feeds into)
+                # Query by table name primarily, database/schema are optional filters
+                downstream_lineage = get_downstream_lineage(
+                    db=db,
+                    org_id=analysis.org_id,
+                    source_database=None,  # Query all databases for this table
+                    source_schema=None,   # Query all schemas for this table
+                    source_table=changed_table,
+                    source_column=changed_column
+                )
+                complete_lineage["downstream"] = downstream_lineage
+            
+            enhanced_file["complete_lineage"] = complete_lineage
+            enhanced_files.append(enhanced_file)
+        
+        # Create enhanced analysis_data
+        enhanced_analysis_data = analysis.analysis_data.copy()
+        enhanced_analysis_data["files"] = enhanced_files
+        
+        # Create a new analysis object with enhanced data
+        # We need to convert to dict, modify, and return
+        analysis_dict = {
+            "id": analysis.id,
+            "org_id": analysis.org_id,
+            "installation_id": analysis.installation_id,
+            "repository_id": analysis.repository_id,
+            "repo_full_name": analysis.repo_full_name,
+            "pr_number": analysis.pr_number,
+            "pr_title": analysis.pr_title,
+            "pr_description": analysis.pr_description,
+            "branch_name": analysis.branch_name,
+            "author_name": analysis.author_name,
+            "pr_url": analysis.pr_url,
+            "total_impacted_queries": analysis.total_impacted_queries,
+            "analysis_data": enhanced_analysis_data,
+            "created_at": analysis.created_at,
+            "updated_at": analysis.updated_at,
+        }
+        
+        # Return using the response model
+        return PRAAnalysisResponse(**analysis_dict)
+    
     return analysis
