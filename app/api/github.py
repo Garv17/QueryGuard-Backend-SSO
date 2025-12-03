@@ -912,7 +912,7 @@ def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_u
             changed_database = parsed_change.get("database")
             changed_schema = parsed_change.get("schema")
             
-            # Add is_impacted flag to source_metadata
+            # Enhance source_metadata with source information and is_impacted flag
             source_metadata = file_data.get("source_metadata", [])
             enhanced_source_metadata = []
             
@@ -921,8 +921,54 @@ def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_u
             
             for metadata_entry in source_metadata:
                 enhanced_entry = metadata_entry.copy()
+                
+                # Try to find the actual source from lineage table by matching the target
+                target_db = metadata_entry.get("target_database")
+                target_schema = metadata_entry.get("target_schema")
+                target_table = metadata_entry.get("target_table")
+                target_column = metadata_entry.get("target_column")
+                
+                # Query lineage to find the source for this target
+                lineage_match = db.query(ColumnLevelLineage).filter(
+                    ColumnLevelLineage.org_id == analysis.org_id,
+                    ColumnLevelLineage.is_active == 1,
+                    func.lower(ColumnLevelLineage.target_table) == func.lower(target_table),
+                    func.lower(ColumnLevelLineage.target_column) == func.lower(target_column)
+                )
+                
+                if target_db:
+                    lineage_match = lineage_match.filter(
+                        func.lower(ColumnLevelLineage.target_database) == func.lower(target_db)
+                    )
+                if target_schema:
+                    lineage_match = lineage_match.filter(
+                        func.lower(ColumnLevelLineage.target_schema) == func.lower(target_schema)
+                    )
+                if changed_table:
+                    lineage_match = lineage_match.filter(
+                        func.lower(ColumnLevelLineage.source_table) == func.lower(changed_table)
+                    )
+                if changed_column:
+                    lineage_match = lineage_match.filter(
+                        func.lower(ColumnLevelLineage.source_column) == func.lower(changed_column)
+                    )
+                
+                lineage_record = lineage_match.first()
+                
+                if lineage_record:
+                    # Use actual source from lineage table
+                    enhanced_entry["source_database"] = lineage_record.source_database
+                    enhanced_entry["source_schema"] = lineage_record.source_schema
+                    enhanced_entry["source_table"] = lineage_record.source_table
+                    enhanced_entry["source_column"] = lineage_record.source_column
+                else:
+                    # Fallback to parsed change values if no lineage match found
+                    enhanced_entry["source_database"] = changed_database
+                    enhanced_entry["source_schema"] = changed_schema
+                    enhanced_entry["source_table"] = changed_table
+                    enhanced_entry["source_column"] = changed_column
+                
                 # Flag entries where the target column is directly impacted
-                # This is already in source_metadata, so we mark them as impacted
                 enhanced_entry["is_impacted"] = True
                 enhanced_source_metadata.append(enhanced_entry)
             
@@ -936,26 +982,26 @@ def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_u
             
             if changed_table:
                 # Get upstream lineage (what feeds into the changed table)
-                # Query by table name primarily, database/schema are optional filters
+                # Query ALL columns for this table (not just the changed column)
                 upstream_lineage = get_upstream_lineage(
                     db=db,
                     org_id=analysis.org_id,
                     target_database=None,  # Query all databases for this table
                     target_schema=None,   # Query all schemas for this table
                     target_table=changed_table,
-                    target_column=changed_column
+                    target_column=None  # Get ALL columns, not just the changed one
                 )
                 complete_lineage["upstream"] = upstream_lineage
                 
                 # Get downstream lineage (what the changed table feeds into)
-                # Query by table name primarily, database/schema are optional filters
+                # Query ALL columns for this table (not just the changed column)
                 downstream_lineage = get_downstream_lineage(
                     db=db,
                     org_id=analysis.org_id,
                     source_database=None,  # Query all databases for this table
                     source_schema=None,   # Query all schemas for this table
                     source_table=changed_table,
-                    source_column=changed_column
+                    source_column=None  # Get ALL columns, not just the changed one
                 )
                 complete_lineage["downstream"] = downstream_lineage
             
