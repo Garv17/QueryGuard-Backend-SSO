@@ -445,6 +445,48 @@ def list_connections(current_user: User = Depends(get_current_user), db: Session
     return connections
 
 
+@router.delete("/connections/{connection_id}")
+def deactivate_connection(
+    connection_id: str,
+    current_user: User = Depends(require_connector_access()),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """Deactivate a Snowflake connection (soft delete)"""
+    try:
+        conn_uuid = uuid.UUID(connection_id)
+    except ValueError:
+        logger.warning("/snowflake/connections - delete: invalid id %s", connection_id)
+        raise HTTPException(status_code=400, detail="Invalid connection ID format")
+
+    connection = db.query(SnowflakeConnection).filter(
+        SnowflakeConnection.id == conn_uuid,
+        SnowflakeConnection.org_id == current_user.org_id,
+        SnowflakeConnection.is_active == True
+    ).first()
+    
+    if not connection:
+        logger.warning("/snowflake/connections - delete: connection not found %s", conn_uuid)
+        raise HTTPException(status_code=404, detail="Snowflake connection not found")
+
+    connection.is_active = False
+    
+    # Also deactivate the associated job if it exists
+    job = db.query(SnowflakeJob).filter(SnowflakeJob.connection_id == conn_uuid).first()
+    if job:
+        job.is_active = False
+        logger.debug("/snowflake/connections - delete: deactivated job for connection %s", conn_uuid)
+    
+    try:
+        db.commit()
+        logger.info("/snowflake/connections - delete: deactivated id=%s", connection.id)
+        return {"message": "Snowflake connection deactivated successfully"}
+    except IntegrityError:
+        db.rollback()
+        logger.exception("/snowflake/connections - delete: failed to deactivate")
+        raise HTTPException(status_code=400, detail="Failed to deactivate connection")
+
+
 @router.get("/fetch-databases/{connection_id}")
 def fetch_databases(connection_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
     """Fetch all databases from Snowflake connection"""
