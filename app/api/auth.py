@@ -2,6 +2,7 @@
 # POST /auth/login → login & get JWT
 # POST /auth/forgot-password → generate reset token
 # POST /auth/reset-password → reset password with token
+# POST /auth/change-password → change password (requires authentication)
 # POST /auth/logout → revoke JWT
 # GET /auth/me → get current user info
 
@@ -49,6 +50,10 @@ class ForgotPassword(BaseModel):
 
 class ResetPassword(BaseModel):
     token: str
+    new_password: str
+
+class ChangePassword(BaseModel):
+    current_password: str
     new_password: str
 
 class UserResponse(BaseModel):
@@ -343,6 +348,40 @@ def logout(current_user: User = Depends(get_current_user), db: Session = Depends
     
     logger.info("/auth/logout - tokens revoked for user_id=%s", current_user.id)
     return {"message": "Logged out successfully"}
+
+
+@router.post("/change-password")
+def change_password(
+    req: ChangePassword,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """
+    Change password for authenticated user.
+    Requires current password verification and sets new password.
+    """
+    logger.info("POST /auth/change-password - user_id=%s ip=%s", current_user.id, request.client.host if request and request.client else "unknown")
+    
+    # Verify current password
+    if current_user.password_hash != hash_password(req.current_password):
+        logger.warning("/auth/change-password - invalid current password for user_id=%s", current_user.id)
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    
+    # Check if new password is different from current password
+    if hash_password(req.new_password) == current_user.password_hash:
+        logger.warning("/auth/change-password - new password same as current password for user_id=%s", current_user.id)
+        raise HTTPException(status_code=400, detail="New password must be different from current password")
+    
+    # Update password
+    current_user.password_hash = hash_password(req.new_password)
+    
+    # Revoke all existing tokens for this user (force re-login for security)
+    db.query(UserToken).filter(UserToken.user_id == current_user.id).update({"is_revoked": True})
+    
+    db.commit()
+    logger.info("/auth/change-password - password changed successfully for user_id=%s", current_user.id)
+    return {"message": "Password changed successfully"}
 
 
 @router.get("/me", response_model=UserResponse)
