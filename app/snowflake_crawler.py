@@ -249,35 +249,44 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
         audit.finished_at = datetime.now(timezone.utc)
         db.commit()
         
-        # Check if there's unprocessed query history in the database
-        # Get the last processed timestamp from watermark
-        last_processed = (
-            db.query(func.max(LineageLoadWatermark.last_processed_at))
-            .filter_by(connection_id=conn.id, org_id=conn.org_id)
-            .scalar()
-        ) or datetime(1900, 1, 1, tzinfo=timezone.utc)
+        # Close the main session before long-running operations to avoid connection issues
+        # Create a new session for checking unprocessed queries
+        should_run_lineage = len(to_insert) > 0  # Default: only if new data was fetched
+        unprocessed_count = 0
         
-        logger.info("📊 Last processed timestamp: %s (org_id=%s, conn_id=%s)", 
-                   last_processed, conn.org_id, conn.id)
-        
-        # Count unprocessed query records
-        unprocessed_count = db.query(SnowflakeQueryRecord).filter(
-            SnowflakeQueryRecord.org_id == conn.org_id,
-            SnowflakeQueryRecord.connection_id == conn.id,
-            SnowflakeQueryRecord.created_at > last_processed
-        ).count()
-        
-        # Count total query records for this connection
-        total_query_count = db.query(SnowflakeQueryRecord).filter(
-            SnowflakeQueryRecord.org_id == conn.org_id,
-            SnowflakeQueryRecord.connection_id == conn.id
-        ).count()
-        
-        logger.info("📊 Query history stats: total=%d, unprocessed=%d, new_fetched=%d", 
-                   total_query_count, unprocessed_count, len(to_insert))
-        
-        # Run lineage builder if new data was fetched OR if there's unprocessed existing data
-        should_run_lineage = len(to_insert) > 0 or unprocessed_count > 0
+        check_db: Session = SessionLocal()
+        try:
+            # Check if there's unprocessed query history in the database
+            # Get the last processed timestamp from watermark
+            last_processed = (
+                check_db.query(func.max(LineageLoadWatermark.last_processed_at))
+                .filter_by(connection_id=conn.id, org_id=conn.org_id)
+                .scalar()
+            ) or datetime(1900, 1, 1, tzinfo=timezone.utc)
+            
+            logger.info("📊 Last processed timestamp: %s (org_id=%s, conn_id=%s)", 
+                       last_processed, conn.org_id, conn.id)
+            
+            # Count unprocessed query records
+            unprocessed_count = check_db.query(SnowflakeQueryRecord).filter(
+                SnowflakeQueryRecord.org_id == conn.org_id,
+                SnowflakeQueryRecord.connection_id == conn.id,
+                SnowflakeQueryRecord.created_at > last_processed
+            ).count()
+            
+            # Count total query records for this connection
+            total_query_count = check_db.query(SnowflakeQueryRecord).filter(
+                SnowflakeQueryRecord.org_id == conn.org_id,
+                SnowflakeQueryRecord.connection_id == conn.id
+            ).count()
+            
+            logger.info("📊 Query history stats: total=%d, unprocessed=%d, new_fetched=%d", 
+                       total_query_count, unprocessed_count, len(to_insert))
+            
+            # Run lineage builder if new data was fetched OR if there's unprocessed existing data
+            should_run_lineage = len(to_insert) > 0 or unprocessed_count > 0
+        finally:
+            check_db.close()
         
         if should_run_lineage:
             if len(to_insert) > 0:
@@ -389,7 +398,11 @@ def polling_worker(stop_event: threading.Event, interval_seconds: int = 60):
         except Exception as e:
             logger.exception("❌ Worker error: %s", str(e))
         finally:
-            db.close()
+            try:
+                db.close()
+            except Exception as close_err:
+                # Connection may have already crashed, log but don't raise
+                logger.warning("⚠️  Error closing database session (connection may have crashed): %s", str(close_err))
 
         elapsed = time.time() - start_ts
         sleep_for = max(1.0, interval_seconds - elapsed)
