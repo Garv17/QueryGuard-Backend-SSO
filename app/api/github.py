@@ -977,10 +977,20 @@ def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_u
             # Get complete lineage data if we have table information
             complete_lineage = {
                 "upstream": [],
-                "downstream": []
+                "downstream": [],
+                "center_node": None
             }
             
             if changed_table:
+                # Set center node - the table/column that has the change (starting point for lineage visualization)
+                center_node = {
+                    "database": changed_database,
+                    "schema": changed_schema,
+                    "table": changed_table,
+                    "column": changed_column
+                }
+                complete_lineage["center_node"] = center_node
+                
                 # Get upstream lineage (what feeds into the changed table)
                 # Query ALL columns for this table (not just the changed column)
                 upstream_lineage = get_upstream_lineage(
