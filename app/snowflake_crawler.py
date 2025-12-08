@@ -256,16 +256,19 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
                 logger.info("✅ Lineage builder completed successfully")
 
                 # --- Vector embeddings sync for this batch ---
+                # Create a new database session for embedding sync to avoid idle-in-transaction timeout
+                # The previous session may have been idle during the long-running lineage_builder
+                embed_db: Session = SessionLocal()
                 try:
                     # Count active/inactive lineage rows for this batch
-                    active_count = db.query(ColumnLevelLineage).filter(
+                    active_count = embed_db.query(ColumnLevelLineage).filter(
                         ColumnLevelLineage.org_id == conn.org_id,
                         ColumnLevelLineage.connection_id == conn.id,
                         ColumnLevelLineage.batch_id == batch_id,
                         ColumnLevelLineage.is_active == 1,
                     ).count()
 
-                    inactive_count = db.query(ColumnLevelLineage).filter(
+                    inactive_count = embed_db.query(ColumnLevelLineage).filter(
                         ColumnLevelLineage.org_id == conn.org_id,
                         ColumnLevelLineage.connection_id == conn.id,
                         ColumnLevelLineage.batch_id == batch_id,
@@ -301,6 +304,8 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
                         batch_id,
                         str(embed_err),
                     )
+                finally:
+                    embed_db.close()
             except Exception as lineage_error:
                 logger.error("❌ Lineage builder failed: %s", str(lineage_error))
                 # Don't fail the entire crawl if lineage builder fails
