@@ -196,6 +196,33 @@ def add_comment_to_pr(access_token: str, repo_full_name: str, pr_number: int, co
     return response.status_code == 201
 
 
+def extract_actual_sql_from_diff(sql_change: str) -> str:
+    """
+    Extract the actual SQL change from a diff format.
+    Diff format example:
+    File: file.sql (modified) [+1/-1]
+    @@ -1 +1 @@
+    -ALTER TABLE old.table DROP COLUMN col;
+    +ALTER TABLE new.table DROP COLUMN col;
+    
+    Returns the line starting with '+' (the new change), or the original text if not a diff.
+    """
+    if not sql_change:
+        return ""
+    
+    # Look for lines starting with '+' that contain ALTER TABLE
+    lines = sql_change.split('\n')
+    for line in lines:
+        line_stripped = line.strip()
+        # Check if it's a diff line with '+' and contains ALTER TABLE
+        if line_stripped.startswith('+') and 'ALTER TABLE' in line_stripped.upper():
+            # Remove the '+' prefix and return
+            return line_stripped[1:].strip()
+    
+    # If no diff format found, return original (might be plain SQL)
+    return sql_change
+
+
 def get_upstream_lineage(
     db: Session,
     org_id: UUID,
@@ -904,7 +931,9 @@ def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_u
             
             # Parse SQL change to extract table and column information
             sql_change = file_data.get("sql_change", "")
-            parsed_change = parse_schema_change(sql_change)
+            # Extract actual SQL from diff format (if it's a diff)
+            actual_sql = extract_actual_sql_from_diff(sql_change)
+            parsed_change = parse_schema_change(actual_sql)
             
             # Extract table and column info
             changed_table = parsed_change.get("table_name")
