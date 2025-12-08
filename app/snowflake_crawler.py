@@ -378,31 +378,45 @@ def polling_worker(stop_event: threading.Event, interval_seconds: int = 60):
         start_ts = time.time()
         now = datetime.now(timezone.utc)
         
+        # Create a session just for querying jobs
         db: Session = SessionLocal()
+        jobs = []
         try:
             jobs = db.query(SnowflakeJob).filter(SnowflakeJob.is_active == True).all()
-            
-            if not jobs:
-                logger.debug("⏸️  No active jobs found")
-            else:
-                due_jobs = 0
-                for job in jobs:
-                    if job.cron_expression and _due_to_run(job.cron_expression, job.last_run_time, now):
-                        due_jobs += 1
-                        logger.info("⏰ Job due: %s (cron: %s)", str(job.id)[:8], job.cron_expression)
-                        run_crawl_for_connection(db, job, now)
-                
-                if due_jobs > 0:
-                    logger.info("✅ Processed %d due jobs", due_jobs)
-                
         except Exception as e:
-            logger.exception("❌ Worker error: %s", str(e))
+            logger.exception("❌ Error querying jobs: %s", str(e))
         finally:
+            # Close the session immediately after querying jobs
+            # This prevents the connection from being idle during long-running crawl operations
             try:
                 db.close()
             except Exception as close_err:
-                # Connection may have already crashed, log but don't raise
-                logger.warning("⚠️  Error closing database session (connection may have crashed): %s", str(close_err))
+                logger.warning("⚠️  Error closing database session: %s", str(close_err))
+        
+        # Process jobs with separate sessions for each job
+        if not jobs:
+            logger.debug("⏸️  No active jobs found")
+        else:
+            due_jobs = 0
+            for job in jobs:
+                if job.cron_expression and _due_to_run(job.cron_expression, job.last_run_time, now):
+                    due_jobs += 1
+                    logger.info("⏰ Job due: %s (cron: %s)", str(job.id)[:8], job.cron_expression)
+                    try:
+                        # Create a fresh session for each job to avoid connection timeouts
+                        job_db: Session = SessionLocal()
+                        try:
+                            run_crawl_for_connection(job_db, job, now)
+                        finally:
+                            try:
+                                job_db.close()
+                            except Exception as close_err:
+                                logger.warning("⚠️  Error closing job database session: %s", str(close_err))
+                    except Exception as job_err:
+                        logger.exception("❌ Error processing job %s: %s", str(job.id)[:8], str(job_err))
+            
+            if due_jobs > 0:
+                logger.info("✅ Processed %d due jobs", due_jobs)
 
         elapsed = time.time() - start_ts
         sleep_for = max(1.0, interval_seconds - elapsed)
