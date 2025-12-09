@@ -15,7 +15,7 @@ from pydantic import BaseModel
 import json
 import requests
 from app.database import get_db
-from app.utils.models import GitHubInstallation, GitHubRepository, Organization, User, GitHubPullRequestAnalysis
+from app.utils.models import GitHubInstallation, GitHubRepository, Organization, User, GitHubPullRequestAnalysis, ColumnLevelLineage
 from app.utils.auth_deps import get_current_user
 from app.utils.rbac import require_connector_access
 import uuid
@@ -24,9 +24,9 @@ from datetime import datetime
 import os
 import logging
 from urllib.parse import unquote
-from app.services.impact_analysis import schema_detection_rag, dbt_model_detection_rag, fetch_queries, store_pr_analysis
+from app.services.impact_analysis import schema_detection_rag, dbt_model_detection_rag, fetch_queries, store_pr_analysis, parse_schema_change
 from github import GithubIntegration, Github
-from sqlalchemy import and_
+from sqlalchemy import and_, or_, func
 
 router = APIRouter(prefix="/github", tags=["GitHub"])
 
@@ -196,6 +196,127 @@ def add_comment_to_pr(access_token: str, repo_full_name: str, pr_number: int, co
     return response.status_code == 201
 
 
+def extract_actual_sql_from_diff(sql_change: str) -> str:
+    """
+    Extract the actual SQL change from a diff format.
+    Diff format example:
+    File: file.sql (modified) [+1/-1]
+    @@ -1 +1 @@
+    -ALTER TABLE old.table DROP COLUMN col;
+    +ALTER TABLE new.table DROP COLUMN col;
+    
+    Returns the line starting with '+' (the new change), or the original text if not a diff.
+    """
+    if not sql_change:
+        return ""
+    
+    # Look for lines starting with '+' that contain ALTER TABLE
+    lines = sql_change.split('\n')
+    for line in lines:
+        line_stripped = line.strip()
+        # Check if it's a diff line with '+' and contains ALTER TABLE
+        if line_stripped.startswith('+') and 'ALTER TABLE' in line_stripped.upper():
+            # Remove the '+' prefix and return
+            return line_stripped[1:].strip()
+    
+    # If no diff format found, return original (might be plain SQL)
+    return sql_change
+
+
+def get_upstream_lineage(
+    db: Session,
+    org_id: UUID,
+    target_database: Optional[str],
+    target_schema: Optional[str],
+    target_table: str,
+    target_column: Optional[str] = None
+) -> List[dict]:
+    """
+    Query upstream lineage (what feeds into the target table/column).
+    Returns all source columns that feed into the specified target.
+    Uses case-insensitive matching for table/column names.
+    """
+    query = db.query(ColumnLevelLineage).filter(
+        ColumnLevelLineage.org_id == org_id,
+        ColumnLevelLineage.is_active == 1,
+        func.lower(ColumnLevelLineage.target_table) == func.lower(target_table)
+    )
+    
+    if target_database:
+        query = query.filter(func.lower(ColumnLevelLineage.target_database) == func.lower(target_database))
+    if target_schema:
+        query = query.filter(func.lower(ColumnLevelLineage.target_schema) == func.lower(target_schema))
+    if target_column:
+        query = query.filter(func.lower(ColumnLevelLineage.target_column) == func.lower(target_column))
+    
+    lineage_records = query.all()
+    
+    result = []
+    for record in lineage_records:
+        result.append({
+            "source_database": record.source_database,
+            "source_schema": record.source_schema,
+            "source_table": record.source_table,
+            "source_column": record.source_column,
+            "target_database": record.target_database,
+            "target_schema": record.target_schema,
+            "target_table": record.target_table,
+            "target_column": record.target_column,
+            "query_id": record.query_id,
+            "query_type": record.query_type,
+            "dbt_model_file_path": record.dbt_model_file_path,
+        })
+    
+    return result
+
+
+def get_downstream_lineage(
+    db: Session,
+    org_id: UUID,
+    source_database: Optional[str],
+    source_schema: Optional[str],
+    source_table: str,
+    source_column: Optional[str] = None
+) -> List[dict]:
+    """
+    Query downstream lineage (what the source table/column feeds into).
+    Returns all target columns that depend on the specified source.
+    Uses case-insensitive matching for table/column names.
+    """
+    query = db.query(ColumnLevelLineage).filter(
+        ColumnLevelLineage.org_id == org_id,
+        ColumnLevelLineage.is_active == 1,
+        func.lower(ColumnLevelLineage.source_table) == func.lower(source_table)
+    )
+    
+    if source_database:
+        query = query.filter(func.lower(ColumnLevelLineage.source_database) == func.lower(source_database))
+    if source_schema:
+        query = query.filter(func.lower(ColumnLevelLineage.source_schema) == func.lower(source_schema))
+    if source_column:
+        query = query.filter(func.lower(ColumnLevelLineage.source_column) == func.lower(source_column))
+    
+    lineage_records = query.all()
+    
+    result = []
+    for record in lineage_records:
+        result.append({
+            "source_database": record.source_database,
+            "source_schema": record.source_schema,
+            "source_table": record.source_table,
+            "source_column": record.source_column,
+            "target_database": record.target_database,
+            "target_schema": record.target_schema,
+            "target_table": record.target_table,
+            "target_column": record.target_column,
+            "query_id": record.query_id,
+            "query_type": record.query_type,
+            "dbt_model_file_path": record.dbt_model_file_path,
+        })
+    
+    return result
+
+
 # --- Endpoints ---
 @router.get("/install")
 def github_install(org_id: str, request: Request):
@@ -216,14 +337,55 @@ def github_install(org_id: str, request: Request):
 
 @router.get("/callback")
 def github_callback(
-    installation_id: str,
+    installation_id: Optional[str] = None,
     setup_action: Optional[str] = None,
     state: Optional[str] = None,
     code: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """Handle GitHub App installation callback"""
-    logger.info("GitHub callback received installation_id=%s setup_action=%s state=%s", installation_id, setup_action, state)
+    logger.info("GitHub callback received installation_id=%s setup_action=%s state=%s code=%s", installation_id, setup_action, state, code)
+
+    # Handle setup_action=request (pending approval) - GitHub doesn't send installation_id yet
+    if setup_action == "request":
+        logger.info("/github/callback - installation request pending approval (setup_action=request)")
+        if not state:
+            return {"message": "Installation request received but no state parameter - cannot associate with organization"}
+        
+        try:
+            # Validate state (org_id) format
+            normalized_state = unquote(state)
+            if normalized_state.startswith('/'):
+                normalized_state = normalized_state[1:]
+            org_uuid = uuid.UUID(normalized_state)
+            
+            # Check if organization exists
+            organization = db.query(Organization).filter(
+                Organization.id == org_uuid,
+                Organization.is_active == True
+            ).first()
+            
+            if not organization:
+                logger.warning("/github/callback - organization not found for pending request: %s", org_uuid)
+                return {"message": "Organization not found", "status": "error"}
+            
+            return {
+                "message": "GitHub App installation request received. Waiting for organization administrator approval.",
+                "org_id": str(org_uuid),
+                "status": "pending_approval",
+                "setup_action": "request"
+            }
+        except ValueError:
+            logger.warning("/github/callback - invalid state format in request: %s", state)
+            return {"message": "Invalid state parameter", "status": "error"}
+    
+    # For setup_action=install or when installation_id is present, proceed with installation
+    if not installation_id:
+        logger.warning("/github/callback - missing installation_id and setup_action is not 'request'")
+        return {
+            "message": "Installation ID is required for installation completion",
+            "status": "error"
+        }
 
     # If no state parameter, ignore the installation (not from our flow)
     if not state:
@@ -743,7 +905,7 @@ def process_pr_changes(pr_request: PRProcessRequest, current_user: User = Depend
 
 @router.get("/analyses/{analysis_id}", response_model=PRAAnalysisResponse)
 def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Fetch stored PR analysis by its UUID"""
+    """Fetch stored PR analysis by its UUID with enhanced lineage data"""
     try:
         analysis_uuid = uuid.UUID(analysis_id)
     except ValueError:
@@ -760,4 +922,156 @@ def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_u
     if analysis.org_id != current_user.org_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
+    # Enhance analysis_data with lineage information
+    if analysis.analysis_data and "files" in analysis.analysis_data:
+        enhanced_files = []
+        
+        for file_data in analysis.analysis_data["files"]:
+            enhanced_file = file_data.copy()
+            
+            # Parse SQL change to extract table and column information
+            sql_change = file_data.get("sql_change", "")
+            # Extract actual SQL from diff format (if it's a diff)
+            actual_sql = extract_actual_sql_from_diff(sql_change)
+            parsed_change = parse_schema_change(actual_sql)
+            
+            # Extract table and column info
+            changed_table = parsed_change.get("table_name")
+            changed_column = parsed_change.get("column_name")
+            changed_database = parsed_change.get("database")
+            changed_schema = parsed_change.get("schema")
+            
+            # Enhance source_metadata with source information and is_impacted flag
+            source_metadata = file_data.get("source_metadata", [])
+            enhanced_source_metadata = []
+            
+            # Get the changed column name (normalized)
+            changed_column_lower = changed_column.lower() if changed_column else None
+            
+            for metadata_entry in source_metadata:
+                enhanced_entry = metadata_entry.copy()
+                
+                # Try to find the actual source from lineage table by matching the target
+                target_db = metadata_entry.get("target_database")
+                target_schema = metadata_entry.get("target_schema")
+                target_table = metadata_entry.get("target_table")
+                target_column = metadata_entry.get("target_column")
+                
+                # Query lineage to find the source for this target
+                lineage_match = db.query(ColumnLevelLineage).filter(
+                    ColumnLevelLineage.org_id == analysis.org_id,
+                    ColumnLevelLineage.is_active == 1,
+                    func.lower(ColumnLevelLineage.target_table) == func.lower(target_table),
+                    func.lower(ColumnLevelLineage.target_column) == func.lower(target_column)
+                )
+                
+                if target_db:
+                    lineage_match = lineage_match.filter(
+                        func.lower(ColumnLevelLineage.target_database) == func.lower(target_db)
+                    )
+                if target_schema:
+                    lineage_match = lineage_match.filter(
+                        func.lower(ColumnLevelLineage.target_schema) == func.lower(target_schema)
+                    )
+                if changed_table:
+                    lineage_match = lineage_match.filter(
+                        func.lower(ColumnLevelLineage.source_table) == func.lower(changed_table)
+                    )
+                if changed_column:
+                    lineage_match = lineage_match.filter(
+                        func.lower(ColumnLevelLineage.source_column) == func.lower(changed_column)
+                    )
+                
+                lineage_record = lineage_match.first()
+                
+                if lineage_record:
+                    # Use actual source from lineage table
+                    enhanced_entry["source_database"] = lineage_record.source_database
+                    enhanced_entry["source_schema"] = lineage_record.source_schema
+                    enhanced_entry["source_table"] = lineage_record.source_table
+                    enhanced_entry["source_column"] = lineage_record.source_column
+                else:
+                    # Fallback to parsed change values if no lineage match found
+                    enhanced_entry["source_database"] = changed_database
+                    enhanced_entry["source_schema"] = changed_schema
+                    enhanced_entry["source_table"] = changed_table
+                    enhanced_entry["source_column"] = changed_column
+                
+                # Flag entries where the target column is directly impacted
+                enhanced_entry["is_impacted"] = True
+                enhanced_source_metadata.append(enhanced_entry)
+            
+            enhanced_file["source_metadata"] = enhanced_source_metadata
+            
+            # Get complete lineage data if we have table information
+            complete_lineage = {
+                "upstream": [],
+                "downstream": [],
+                "center_node": None
+            }
+            
+            if changed_table:
+                # Set center node - the table/column that has the change (starting point for lineage visualization)
+                center_node = {
+                    "database": changed_database,
+                    "schema": changed_schema,
+                    "table": changed_table,
+                    "column": changed_column
+                }
+                complete_lineage["center_node"] = center_node
+                
+                # Get upstream lineage (what feeds into the changed table)
+                # Query ALL columns for this table (not just the changed column)
+                upstream_lineage = get_upstream_lineage(
+                    db=db,
+                    org_id=analysis.org_id,
+                    target_database=None,  # Query all databases for this table
+                    target_schema=None,   # Query all schemas for this table
+                    target_table=changed_table,
+                    target_column=None  # Get ALL columns, not just the changed one
+                )
+                complete_lineage["upstream"] = upstream_lineage
+                
+                # Get downstream lineage (what the changed table feeds into)
+                # Query ALL columns for this table (not just the changed column)
+                downstream_lineage = get_downstream_lineage(
+                    db=db,
+                    org_id=analysis.org_id,
+                    source_database=None,  # Query all databases for this table
+                    source_schema=None,   # Query all schemas for this table
+                    source_table=changed_table,
+                    source_column=None  # Get ALL columns, not just the changed one
+                )
+                complete_lineage["downstream"] = downstream_lineage
+            
+            enhanced_file["complete_lineage"] = complete_lineage
+            enhanced_files.append(enhanced_file)
+        
+        # Create enhanced analysis_data
+        enhanced_analysis_data = analysis.analysis_data.copy()
+        enhanced_analysis_data["files"] = enhanced_files
+        
+        # Create a new analysis object with enhanced data
+        # We need to convert to dict, modify, and return
+        analysis_dict = {
+            "id": analysis.id,
+            "org_id": analysis.org_id,
+            "installation_id": analysis.installation_id,
+            "repository_id": analysis.repository_id,
+            "repo_full_name": analysis.repo_full_name,
+            "pr_number": analysis.pr_number,
+            "pr_title": analysis.pr_title,
+            "pr_description": analysis.pr_description,
+            "branch_name": analysis.branch_name,
+            "author_name": analysis.author_name,
+            "pr_url": analysis.pr_url,
+            "total_impacted_queries": analysis.total_impacted_queries,
+            "analysis_data": enhanced_analysis_data,
+            "created_at": analysis.created_at,
+            "updated_at": analysis.updated_at,
+        }
+        
+        # Return using the response model
+        return PRAAnalysisResponse(**analysis_dict)
+    
     return analysis

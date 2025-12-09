@@ -247,8 +247,12 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
         audit.finished_at = datetime.now(timezone.utc)
         db.commit()
         
-        # Run lineage builder if data was fetched
+        # Only run lineage builder if new data was fetched in this batch
+        # This prevents processing the same queries multiple times with different batch_ids
+        # Unprocessed queries from previous batches will be handled when new data arrives
+        # (the watermark tracks the last processed timestamp, so they'll be included in future runs)
         if len(to_insert) > 0:
+            logger.info("🔄 New query history fetched (%d rows), starting lineage builder", len(to_insert))
             try:
                 logger.info("🔄 Starting lineage builder for org_id: %s, conn_id: %s, batch_id: %s", 
                            conn.org_id, conn.id, batch_id)
@@ -256,16 +260,19 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
                 logger.info("✅ Lineage builder completed successfully")
 
                 # --- Vector embeddings sync for this batch ---
+                # Create a new database session for embedding sync to avoid idle-in-transaction timeout
+                # The previous session may have been idle during the long-running lineage_builder
+                embed_db: Session = SessionLocal()
                 try:
                     # Count active/inactive lineage rows for this batch
-                    active_count = db.query(ColumnLevelLineage).filter(
+                    active_count = embed_db.query(ColumnLevelLineage).filter(
                         ColumnLevelLineage.org_id == conn.org_id,
                         ColumnLevelLineage.connection_id == conn.id,
                         ColumnLevelLineage.batch_id == batch_id,
                         ColumnLevelLineage.is_active == 1,
                     ).count()
 
-                    inactive_count = db.query(ColumnLevelLineage).filter(
+                    inactive_count = embed_db.query(ColumnLevelLineage).filter(
                         ColumnLevelLineage.org_id == conn.org_id,
                         ColumnLevelLineage.connection_id == conn.id,
                         ColumnLevelLineage.batch_id == batch_id,
@@ -301,10 +308,16 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
                         batch_id,
                         str(embed_err),
                     )
+                finally:
+                    embed_db.close()
             except Exception as lineage_error:
                 logger.error("❌ Lineage builder failed: %s", str(lineage_error))
+                import traceback
+                logger.error("Lineage builder traceback: %s", traceback.format_exc())
                 # Don't fail the entire crawl if lineage builder fails
                 pass
+        else:
+            logger.info("⏭️  Skipping lineage builder: no new data fetched (%d rows)", len(to_insert))
                    
     except Exception as e:
         db.rollback()
@@ -324,27 +337,45 @@ def polling_worker(stop_event: threading.Event, interval_seconds: int = 60):
         start_ts = time.time()
         now = datetime.now(timezone.utc)
         
+        # Create a session just for querying jobs
         db: Session = SessionLocal()
+        jobs = []
         try:
             jobs = db.query(SnowflakeJob).filter(SnowflakeJob.is_active == True).all()
-            
-            if not jobs:
-                logger.debug("⏸️  No active jobs found")
-            else:
-                due_jobs = 0
-                for job in jobs:
-                    if job.cron_expression and _due_to_run(job.cron_expression, job.last_run_time, now):
-                        due_jobs += 1
-                        logger.info("⏰ Job due: %s (cron: %s)", str(job.id)[:8], job.cron_expression)
-                        run_crawl_for_connection(db, job, now)
-                
-                if due_jobs > 0:
-                    logger.info("✅ Processed %d due jobs", due_jobs)
-                
         except Exception as e:
-            logger.exception("❌ Worker error: %s", str(e))
+            logger.exception("❌ Error querying jobs: %s", str(e))
         finally:
-            db.close()
+            # Close the session immediately after querying jobs
+            # This prevents the connection from being idle during long-running crawl operations
+            try:
+                db.close()
+            except Exception as close_err:
+                logger.warning("⚠️  Error closing database session: %s", str(close_err))
+        
+        # Process jobs with separate sessions for each job
+        if not jobs:
+            logger.debug("⏸️  No active jobs found")
+        else:
+            due_jobs = 0
+            for job in jobs:
+                if job.cron_expression and _due_to_run(job.cron_expression, job.last_run_time, now):
+                    due_jobs += 1
+                    logger.info("⏰ Job due: %s (cron: %s)", str(job.id)[:8], job.cron_expression)
+                    try:
+                        # Create a fresh session for each job to avoid connection timeouts
+                        job_db: Session = SessionLocal()
+                        try:
+                            run_crawl_for_connection(job_db, job, now)
+                        finally:
+                            try:
+                                job_db.close()
+                            except Exception as close_err:
+                                logger.warning("⚠️  Error closing job database session: %s", str(close_err))
+                    except Exception as job_err:
+                        logger.exception("❌ Error processing job %s: %s", str(job.id)[:8], str(job_err))
+            
+            if due_jobs > 0:
+                logger.info("✅ Processed %d due jobs", due_jobs)
 
         elapsed = time.time() - start_ts
         sleep_for = max(1.0, interval_seconds - elapsed)
