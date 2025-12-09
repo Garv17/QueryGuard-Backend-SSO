@@ -6,9 +6,11 @@ import psycopg2.extras
 import requests
 from requests.auth import HTTPBasicAuth
 import logging
+import re
 
 from app.vector_db import get_db_connection
 from app.vector_db import CHAT_LLM
+from app.tools.pr_repo import fetch_pr_analyses_for_org
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +290,49 @@ Respond with ONLY valid JSON in this format:
             
             if not ticket_data:
                 return f"Error: Could not parse ticket information from request. Please provide: summary, description, and optionally issue_type, priority, assignee, pr_url, analysis_report_url."
+
+            # Heuristic: if user mentioned a PR number but no repo, ask for repo confirmation first
+            repo_full_name = None
+            pr_number = None
+
+            # Try to parse repo and PR from the raw question
+            repo_match = re.search(r"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", question or "")
+            if repo_match:
+                repo_full_name = repo_match.group(1)
+            pr_match = re.search(r"\bpr\s*#?(\d+)\b|\b#(\d+)\b|\bpr\s+(\d+)\b", (question or "").lower())
+            if pr_match:
+                pr_number = int(next(g for g in pr_match.groups() if g))
+
+            # Try to infer repo/pr from pr_url if provided
+            pr_url = ticket_data.get("pr_url")
+            if pr_url:
+                url_match = re.search(r"github\.com/([^/]+/[^/]+)/pull/(\d+)", pr_url)
+                if url_match:
+                    repo_full_name = repo_full_name or url_match.group(1)
+                    pr_number = pr_number or int(url_match.group(2))
+
+            # If repo is missing but a PR number is present, surface existing matches and ask for confirmation
+            if pr_number is not None and not repo_full_name:
+                analyses = fetch_pr_analyses_for_org(
+                    org_id=org_id,
+                    pr_number=pr_number,
+                    limit=10,
+                )
+                repo_candidates = sorted({a.get("repo_full_name") for a in analyses if a.get("repo_full_name")})
+                if repo_candidates:
+                    options = "\n".join(f"- {r} (PR #{pr_number})" for r in repo_candidates)
+                    return (
+                        "I found PR analysis records for that PR number but no repository was specified. "
+                        "Please confirm which repository to use before I create the Jira ticket:\n"
+                        f"{options}\n"
+                        "If none of these apply, please provide the full owner/repo."
+                    )
+                else:
+                    return (
+                        "A PR number was provided but no repository was specified. "
+                        "Please provide the full owner/repo (e.g., org/repo) for PR "
+                        f"#{pr_number} so I can create the Jira ticket."
+                    )
             
             # Create the ticket
             result = create_jira_ticket_for_org(

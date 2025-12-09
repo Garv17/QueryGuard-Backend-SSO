@@ -453,6 +453,7 @@ async def chat_with_llm(
             "- If the question is about PR analysis or repository information, use the pr_repo_analysis tool.\n"
             "- If the question asks for code suggestions, fixes, or changes needed based on PR analysis, use the code_suggestion tool.\n"
             "- If the question asks to create a Jira ticket, use the create_jira_ticket tool.\n"
+            "- ALWAYS honor prior conversation context (including repo/PR selections, confirmations, and disambiguations) when invoking any tool. Do not ask the user to repeat details that were already confirmed."
         )
         # Nudge the agent to preferred tool if classification is specific
         preferred_hint = (
@@ -1289,31 +1290,50 @@ async def handle_chat_message(
                         query = f"Previous conversation context:\n{context}\n\nCurrent question: {content}"
                         logger.info(f"Added conversation context: {len(conversation_history)} messages")
                 
-                # LLM classification: decide whether to use tools (lineage/impact) or respond conversationally (other)
-                classify_prompt = (
-                    "You are a classifier. Decide if the user's message requires using specialized tools for: "
-                    "data lineage (extract_lineage), query impact analysis (query_history_search), "
-                    "PR/Repo analysis (pr_repo_analysis), code suggestions (code_suggestion), or Jira ticket creation (create_jira_ticket).\n"
-                    "Respond with exactly one word: lineage, impact, pr, code, jira, or other.\n\n"
-                    f"Message: {content}"
-                )
-                if not CHAT_LLM:
-                    raise Exception("OpenAI API key not configured for chatbot")
-                
-                # Log which LLM is being used
-                actual_model = "unknown"
-                if CHAT_LLM:
-                    if hasattr(CHAT_LLM, 'model_name'):
-                        actual_model = CHAT_LLM.model_name
-                    elif hasattr(CHAT_LLM, 'model'):
-                        actual_model = CHAT_LLM.model
-                    elif hasattr(CHAT_LLM, '_model_name'):
-                        actual_model = CHAT_LLM._model_name
-                    llm_class = type(CHAT_LLM).__name__
-                    logger.info(f"Using CHAT_LLM ({llm_class}) with model: {actual_model} for WebSocket message classification")
+                # Heuristic-first classification: if message clearly asks for Jira/ticket creation, skip LLM
+                classification_label = None
+                try:
+                    import re as _re_cls
+                    lower_msg = (content or "").lower()
+                    if ("jira" in lower_msg or "ticket" in lower_msg) and ("pr" in lower_msg or _re_cls.search(r"\bpr\s*#?\d+\b", lower_msg)):
+                        classification_label = "jira"
+                except Exception:
+                    classification_label = None
+
+                if not classification_label:
+                    # LLM classification: decide whether to use tools (lineage/impact) or respond conversationally (other)
+                    classifier_message = content
+                    classifier_context = ""
+                    if conversation_history:
+                        ctx = format_conversation_context(conversation_history)
+                        if ctx:
+                            classifier_context = f"\nConversation context:\n{ctx}\n"
+                            classifier_message = f"{classifier_context}\nCurrent message: {content}"
+                    classify_prompt = (
+                        "You are a classifier. Decide if the user's message requires using specialized tools for: "
+                        "data lineage (extract_lineage), query impact analysis (query_history_search), "
+                        "PR/Repo analysis (pr_repo_analysis), code suggestions (code_suggestion), or Jira ticket creation (create_jira_ticket).\n"
+                        "If the user is confirming a repo/PR choice (e.g., 'yes that repo', 'use the listed repo') after a prior disambiguation, treat this as Jira ticket creation.\n"
+                        "Respond with exactly one word: lineage, impact, pr, code, jira, or other.\n\n"
+                        f"Message: {classifier_message}"
+                    )
+                    if not CHAT_LLM:
+                        raise Exception("OpenAI API key not configured for chatbot")
                     
-                classification = CHAT_LLM.invoke(classify_prompt)
-                classification_label = (getattr(classification, "content", str(classification)) or "other").strip().lower()
+                    # Log which LLM is being used
+                    actual_model = "unknown"
+                    if CHAT_LLM:
+                        if hasattr(CHAT_LLM, 'model_name'):
+                            actual_model = CHAT_LLM.model_name
+                        elif hasattr(CHAT_LLM, 'model'):
+                            actual_model = CHAT_LLM.model
+                        elif hasattr(CHAT_LLM, '_model_name'):
+                            actual_model = CHAT_LLM._model_name
+                        llm_class = type(CHAT_LLM).__name__
+                        logger.info(f"Using CHAT_LLM ({llm_class}) with model: {actual_model} for WebSocket message classification")
+                        
+                    classification = CHAT_LLM.invoke(classify_prompt)
+                    classification_label = (getattr(classification, "content", str(classification)) or "other").strip().lower()
 
                 if classification_label not in {"lineage", "impact", "pr", "code", "jira"}:
                     # Conversational reply without tools
