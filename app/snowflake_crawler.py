@@ -318,6 +318,63 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
                 pass
         else:
             logger.info("⏭️  Skipping lineage builder: no new data fetched (%d rows)", len(to_insert))
+            # --- Best-effort embedding backfill when no new data ---
+            # Render uses ephemeral disk for Chroma; after deploy, embeddings may be empty
+            # even though column_level_lineage has data. If we have active lineage rows for
+            # this connection, upsert embeddings using the latest batch_id.
+            embed_db: Session = SessionLocal()
+            try:
+                latest_batch = (
+                    embed_db.query(ColumnLevelLineage.batch_id)
+                    .filter(
+                        ColumnLevelLineage.org_id == conn.org_id,
+                        ColumnLevelLineage.connection_id == conn.id,
+                        ColumnLevelLineage.is_active == 1,
+                    )
+                    .order_by(ColumnLevelLineage.created_at.desc())
+                    .first()
+                )
+                if latest_batch and latest_batch[0]:
+                    latest_batch_id = str(latest_batch[0])
+                    active_count = (
+                        embed_db.query(ColumnLevelLineage)
+                        .filter(
+                            ColumnLevelLineage.org_id == conn.org_id,
+                            ColumnLevelLineage.connection_id == conn.id,
+                            ColumnLevelLineage.batch_id == latest_batch_id,
+                            ColumnLevelLineage.is_active == 1,
+                        )
+                        .count()
+                    )
+                    if active_count > 0:
+                        collection_name = f"org_{conn.org_id}"
+                        logger.info(
+                            "🧠 Embedding backfill (no new data): collection=%s org_id=%s conn_id=%s batch_id=%s (active=%d)",
+                            collection_name,
+                            conn.org_id,
+                            conn.id,
+                            latest_batch_id,
+                            active_count,
+                        )
+                        upsert_lineage_embeddings_by_batch(
+                            org_id=str(conn.org_id),
+                            batch_id=latest_batch_id,
+                        )
+                        logger.info(
+                            "✅ Embedding backfill completed for collection=%s org_id=%s batch_id=%s",
+                            collection_name,
+                            conn.org_id,
+                            latest_batch_id,
+                        )
+            except Exception as embed_backfill_err:
+                logger.warning(
+                    "⚠️  Embedding backfill skipped due to error (org=%s conn=%s): %s",
+                    conn.org_id,
+                    conn.id,
+                    str(embed_backfill_err),
+                )
+            finally:
+                embed_db.close()
                    
     except Exception as e:
         db.rollback()
