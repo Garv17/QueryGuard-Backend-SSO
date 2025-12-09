@@ -61,13 +61,13 @@ def fetch_query_access_history_and_information_schema_columns(engine, org_id, co
             .scalar()
         ) or datetime(1900, 1, 1)
 
-        logger.info("Filtering queries with last_processed timestamp: %s (org_id=%s, conn_id=%s)", 
-                   last_processed, org_id, conn_id)
-        # Fetch query history
+        logger.info("Filtering queries with last_processed timestamp: %s (org_id=%s, conn_id=%s, batch_id=%s)", 
+                   last_processed, org_id, conn_id, batch_id)
+        # Fetch query history - only from the current batch to prevent processing same queries multiple times
+        # This ensures each batch only processes its own queries, preventing duplicates
         query_history = (
             session.query(SnowflakeQueryRecord)
-            .filter_by(connection_id=conn_id, org_id=org_id)
-            .filter(SnowflakeQueryRecord.created_at > last_processed)
+            .filter_by(connection_id=conn_id, org_id=org_id, batch_id=batch_id)
             .all()
         )
 

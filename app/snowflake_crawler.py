@@ -17,10 +17,8 @@ from app.utils.models import (
     SnowflakeCrawlAudit,
     SnowflakeQueryRecord,
     InformationSchemacolumns,
-    ColumnLevelLineage,
-    LineageLoadWatermark
+    ColumnLevelLineage
 )
-from sqlalchemy import func
 from app.services.lineage_builder.lineage_builder import lineage_builder
 import snowflake.connector
 from app.vector_db import upsert_lineage_embeddings_by_batch
@@ -249,50 +247,12 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
         audit.finished_at = datetime.now(timezone.utc)
         db.commit()
         
-        # Close the main session before long-running operations to avoid connection issues
-        # Create a new session for checking unprocessed queries
-        should_run_lineage = len(to_insert) > 0  # Default: only if new data was fetched
-        unprocessed_count = 0
-        
-        check_db: Session = SessionLocal()
-        try:
-            # Check if there's unprocessed query history in the database
-            # Get the last processed timestamp from watermark
-            last_processed = (
-                check_db.query(func.max(LineageLoadWatermark.last_processed_at))
-                .filter_by(connection_id=conn.id, org_id=conn.org_id)
-                .scalar()
-            ) or datetime(1900, 1, 1, tzinfo=timezone.utc)
-            
-            logger.info("📊 Last processed timestamp: %s (org_id=%s, conn_id=%s)", 
-                       last_processed, conn.org_id, conn.id)
-            
-            # Count unprocessed query records
-            unprocessed_count = check_db.query(SnowflakeQueryRecord).filter(
-                SnowflakeQueryRecord.org_id == conn.org_id,
-                SnowflakeQueryRecord.connection_id == conn.id,
-                SnowflakeQueryRecord.created_at > last_processed
-            ).count()
-            
-            # Count total query records for this connection
-            total_query_count = check_db.query(SnowflakeQueryRecord).filter(
-                SnowflakeQueryRecord.org_id == conn.org_id,
-                SnowflakeQueryRecord.connection_id == conn.id
-            ).count()
-            
-            logger.info("📊 Query history stats: total=%d, unprocessed=%d, new_fetched=%d", 
-                       total_query_count, unprocessed_count, len(to_insert))
-            
-            # Run lineage builder if new data was fetched OR if there's unprocessed existing data
-            should_run_lineage = len(to_insert) > 0 or unprocessed_count > 0
-        finally:
-            check_db.close()
-        
-        if should_run_lineage:
-            if len(to_insert) > 0:
-                logger.info("🔄 New query history fetched (%d rows), starting lineage builder", len(to_insert))
-            else:
-                logger.info("🔄 Found %d unprocessed query history records, starting lineage builder", unprocessed_count)
+        # Only run lineage builder if new data was fetched in this batch
+        # This prevents processing the same queries multiple times with different batch_ids
+        # Unprocessed queries from previous batches will be handled when new data arrives
+        # (the watermark tracks the last processed timestamp, so they'll be included in future runs)
+        if len(to_insert) > 0:
+            logger.info("🔄 New query history fetched (%d rows), starting lineage builder", len(to_insert))
             try:
                 logger.info("🔄 Starting lineage builder for org_id: %s, conn_id: %s, batch_id: %s", 
                            conn.org_id, conn.id, batch_id)
@@ -357,8 +317,7 @@ def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> N
                 # Don't fail the entire crawl if lineage builder fails
                 pass
         else:
-            logger.info("⏭️  Skipping lineage builder: no new data (%d rows) and no unprocessed queries (%d unprocessed)", 
-                       len(to_insert), unprocessed_count)
+            logger.info("⏭️  Skipping lineage builder: no new data fetched (%d rows)", len(to_insert))
                    
     except Exception as e:
         db.rollback()
