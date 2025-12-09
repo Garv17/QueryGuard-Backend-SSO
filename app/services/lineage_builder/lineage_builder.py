@@ -419,7 +419,7 @@ def lineage_builder(org_id, conn_id, batch_id):
                     if lineage_process.returncode != 0:
                         logging.warning(f"[{query_id}] sqllineage warning: {lineage_process.stderr}")
 
-                    all_edges.extend(sqllineage_lineage.parse_lineage_text(
+                    parsed_edges = sqllineage_lineage.parse_lineage_text(
                         query_id,
                         cleaned_query,
                         query_type,
@@ -429,7 +429,11 @@ def lineage_builder(org_id, conn_id, batch_id):
                         schema_name,
                         information_schema_columns_df,
                         lineage_output,
-                    ))
+                    )
+                    if parsed_edges:
+                        all_edges.extend(parsed_edges)
+                    else:
+                        logging.warning(f"[{query_id}] parse_lineage_text returned no edges; skipping")
 
                 # Only collect valid lineage
                 if final_lineage and not all(v is None for v in final_lineage.values()):
