@@ -1525,19 +1525,31 @@ def get_dependent_columns(df):
     try:
         rows = []
         for _, row in df.iterrows():
+            # Check and handle source columns
             if pd.notna(row['source_database']) and pd.notna(row['source_schema']) \
             and pd.notna(row['source_table']) and pd.notna(row['source_column']):
                 fully_qualified_source_column_name = (
-                    row['source_database'].lower() + '.' +
-                    row['source_schema'].lower() + '.' +
-                    row['source_table'].lower() + '.' +
-                    row['source_column'].lower()
+                    str(row['source_database']).lower() + '.' +
+                    str(row['source_schema']).lower() + '.' +
+                    str(row['source_table']).lower() + '.' +
+                    str(row['source_column']).lower()
                 )
             else:
                 fully_qualified_source_column_name = None
 
-            # fully_qualified_source_column_name = row['source_database'].lower() + '.' + row['source_schema'].lower() + '.' +row['source_table'].lower() + '.' +row['source_column'].lower()
-            fully_qualified_target_column_name = row['target_database'].lower() + '.' + row['target_schema'].lower() + '.' +row['target_table'].lower() + '.' +row['target_column'].lower()
+            # Check and handle target columns - skip row if target columns are missing
+            if pd.notna(row['target_database']) and pd.notna(row['target_schema']) \
+            and pd.notna(row['target_table']) and pd.notna(row['target_column']):
+                fully_qualified_target_column_name = (
+                    str(row['target_database']).lower() + '.' +
+                    str(row['target_schema']).lower() + '.' +
+                    str(row['target_table']).lower() + '.' +
+                    str(row['target_column']).lower()
+                )
+            else:
+                # Skip this row if target columns are missing - we can't process without target information
+                continue
+
             sql_query = row.get('query_text', '')
             base_objects_accessed = row.get('base_objects_accessed', {})
             query_id = row.get('query_id', '')
@@ -1579,18 +1591,24 @@ def get_dependent_columns(df):
                         "source_schema": f_schema,
                         "source_table": f_table,
                         "source_column": f_col,
-                        "target_database": row['target_database'].lower(),
-                        "target_schema": row['target_schema'].lower(),
-                        "target_table": row['target_table'].lower(),
-                        "target_column": row['target_column'].lower(),
+                        "target_database": str(row['target_database']).lower() if pd.notna(row['target_database']) else None,
+                        "target_schema": str(row['target_schema']).lower() if pd.notna(row['target_schema']) else None,
+                        "target_table": str(row['target_table']).lower() if pd.notna(row['target_table']) else None,
+                        "target_column": str(row['target_column']).lower() if pd.notna(row['target_column']) else None,
                         "query_id": query_id,
                         "query_type": query_type,
                         "session_id": session_id,
                         "dependency_score": dependency_score,
                         "dbt_model_file_path": dbt_model_file_path
                     })
-
-        return rows
         
+            logger.info(f"Filter clause columns extracted for query id {query_id}")
+        return rows
+
     except Exception as e:
-        logger.error("Error get_dependent_columns for query_id %s: %s", query_id, e, exc_info=True)
+        try:
+            query_id_str = query_id
+        except NameError:
+            query_id_str = 'unknown'
+        logger.error("Error get_dependent_columns for query_id %s: %s", query_id_str, e, exc_info=True)
+        return []

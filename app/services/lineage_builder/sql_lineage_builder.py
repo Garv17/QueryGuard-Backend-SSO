@@ -532,4 +532,3 @@ def _build_mappings_from_lineage(column_lineage: List[Dict[str, Any]]) -> List[s
 
     return mappings
 
-
