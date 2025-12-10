@@ -334,15 +334,145 @@ Respond with ONLY valid JSON in this format:
                         f"#{pr_number} so I can create the Jira ticket."
                     )
             
+            # If we have both repo and PR number, fetch PR analysis to generate better title/description
+            pr_analysis = None
+            if repo_full_name and pr_number is not None:
+                analyses = fetch_pr_analyses_for_org(
+                    org_id=org_id,
+                    repo_full_name=repo_full_name,
+                    pr_number=pr_number,
+                    limit=1,
+                )
+                if analyses:
+                    pr_analysis = analyses[0]
+            
+            # Generate title and description from PR analysis if available
+            final_summary = ticket_data.get("summary", "")
+            final_description = ticket_data.get("description", "")
+            
+            if pr_analysis:
+                # Use LLM to generate meaningful title and description from PR analysis
+                analysis_data = pr_analysis.get("analysis_data", {})
+                pr_title = pr_analysis.get("pr_title", "")
+                files_data = analysis_data.get("files", []) if isinstance(analysis_data, dict) else []
+                
+                # Collect impacted tables and queries
+                impacted_tables = set()
+                impacted_queries_count = 0
+                for file_data in files_data:
+                    affected_tables = file_data.get("affected_tables", [])
+                    if isinstance(affected_tables, list):
+                        impacted_tables.update(affected_tables)
+                    affected_query_ids = file_data.get("affected_query_ids", [])
+                    if isinstance(affected_query_ids, list):
+                        impacted_queries_count += len(affected_query_ids)
+                
+                # Build context for LLM
+                analysis_summary = {
+                    "pr_title": pr_title,
+                    "pr_number": pr_number,
+                    "repo_full_name": repo_full_name,
+                    "impacted_tables": list(impacted_tables)[:20],  # Limit to avoid token issues
+                    "impacted_queries_count": impacted_queries_count,
+                    "total_files": len(files_data),
+                }
+                
+                # Generate title and description using LLM
+                generate_prompt = f"""Based on the PR analysis data below, generate a Jira ticket title and description.
+
+PR Analysis Summary:
+- PR Title: {pr_title}
+- PR Number: {pr_number}
+- Repository: {repo_full_name}
+- Impacted Tables: {', '.join(list(impacted_tables)[:10]) if impacted_tables else 'None identified'}
+- Total Impacted Queries: {impacted_queries_count}
+- Files Changed: {len(files_data)}
+
+Generate:
+1. A concise, professional Jira ticket title (max 100 chars) that clearly indicates this is about resolving impacted tables/issues from PR {pr_number}
+2. A detailed description that includes:
+   - Summary of the PR changes
+   - List of impacted tables (if any)
+   - Number of impacted queries
+   - Action items or next steps
+
+Respond with ONLY valid JSON in this format:
+{{
+  "summary": "Resolve impacted tables from PR {pr_number}: [brief description]",
+  "description": "## PR Analysis Summary\\n\\n[detailed description with impacted tables, queries, and action items]"
+}}
+
+Make the title specific and actionable. Make the description comprehensive and include all relevant details from the analysis."""
+                # Override with a more concise format (minimal blank lines, 3 actions)
+                generate_prompt = f"""Using the PR analysis data, create a concise Jira title (<=100 chars) and a brief markdown description.
+
+PR Analysis:
+- PR Title: {pr_title}
+- PR Number: {pr_number}
+- Repo: {repo_full_name}
+- Impacted Tables: {', '.join(list(impacted_tables)[:10]) if impacted_tables else 'None'}
+- Impacted Queries: {impacted_queries_count}
+- Files Changed: {len(files_data)}
+
+Rules:
+- If no impacted tables, say "Impacted tables: None (focus on query regressions)".
+- Description must be compact with minimal blank lines.
+- Use short markdown bullets; include exactly three action items.
+
+Return ONLY valid JSON:
+{
+  "summary": "Resolve impacts from PR {pr_number}: [brief]",
+  "description": "PR: {repo_full_name} #{pr_number}\\nTables: ...\\nQueries: ...\\nActions:\\n- ...\\n- ...\\n- ..."
+}"""
+                
+                try:
+                    llm_response = CHAT_LLM.invoke(generate_prompt)
+                    response_text = getattr(llm_response, "content", str(llm_response))
+                    
+                    # Try to parse JSON from response
+                    generated_data = None
+                    try:
+                        generated_data = json.loads(response_text)
+                    except Exception:
+                        # Try to find JSON block
+                        start = response_text.find("{")
+                        end = response_text.rfind("}")
+                        if start != -1 and end != -1:
+                            generated_data = json.loads(response_text[start:end + 1])
+                    
+                    if generated_data:
+                        final_summary = generated_data.get("summary", final_summary)
+                        final_description = generated_data.get("description", final_description)
+                        
+                        # Normalize description spacing and clarify no-table case
+                        try:
+                            import re as _re_cleanup
+                            final_description = _re_cleanup.sub(r"\n{3,}", "\n\n", final_description or "").strip()
+                            final_description = final_description.replace("Impacted Tables:\nNone identified", "Impacted tables: None (focus on query regressions)")
+                            final_description = final_description.replace("Impacted Tables:\nNone", "Impacted tables: None (focus on query regressions)")
+                        except Exception:
+                            final_description = (final_description or "").strip()
+                        
+                        # Add PR URL if not already in description
+                        if pr_analysis.get("pr_url") and pr_analysis.get("pr_url") not in final_description:
+                            final_description += f"\n\nPR URL: {pr_analysis.get('pr_url')}"
+                except Exception as e:
+                    logger.warning(f"Failed to generate title/description from PR analysis: {e}")
+                    # Fallback: use basic title/description
+                    if not final_summary or "unknown" in final_summary.lower():
+                        final_summary = f"Resolve impacted tables from PR {pr_number} in {repo_full_name}"
+                    if not final_description or len(final_description) < 50:
+                        final_description = f"PR Analysis for PR {pr_number} in {repo_full_name}.\n\nImpacted Queries: {impacted_queries_count}\nImpacted Tables: {', '.join(list(impacted_tables)[:10]) if impacted_tables else 'None identified'}"
+            
             # Create the ticket
             result = create_jira_ticket_for_org(
                 org_id=org_id,
-                summary=ticket_data.get("summary", ""),
-                description=ticket_data.get("description", ""),
+                summary=final_summary,
+                description=final_description,
                 issue_type=ticket_data.get("issue_type"),
                 priority=ticket_data.get("priority"),
                 assignee=ticket_data.get("assignee"),
-                pr_url=ticket_data.get("pr_url"),
+                pr_url=ticket_data.get("pr_url") or (pr_analysis.get("pr_url") if pr_analysis else None),
                 analysis_report_url=ticket_data.get("analysis_report_url"),
                 user_id=user_id,
             )

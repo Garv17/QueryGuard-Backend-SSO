@@ -20,6 +20,8 @@ from app.api.auth import get_current_user
 from app.utils.models import User, ChatThread, ChatMessage
 from app.database import get_db, SessionLocal
 from app.tools import build_org_lineage_tool, build_org_query_history_tool, build_org_pr_repo_tool, build_org_code_suggestion_tool, build_org_jira_tool
+from app.tools.jira import create_jira_ticket_for_org
+from app.tools.pr_repo import fetch_pr_analyses_for_org
 from app.vector_db import CHAT_LLM
 from app.services.impact_analysis import fetch_queries
 # PostgresStore long-term memory imports (commented out - not currently in use)
@@ -1290,16 +1292,7 @@ async def handle_chat_message(
                         query = f"Previous conversation context:\n{context}\n\nCurrent question: {content}"
                         logger.info(f"Added conversation context: {len(conversation_history)} messages")
                 
-                # Heuristic-first classification: if message clearly asks for Jira/ticket creation, skip LLM
                 classification_label = None
-                try:
-                    import re as _re_cls
-                    lower_msg = (content or "").lower()
-                    if ("jira" in lower_msg or "ticket" in lower_msg) and ("pr" in lower_msg or _re_cls.search(r"\bpr\s*#?\d+\b", lower_msg)):
-                        classification_label = "jira"
-                except Exception:
-                    classification_label = None
-
                 if not classification_label:
                     # LLM classification: decide whether to use tools (lineage/impact) or respond conversationally (other)
                     classifier_message = content
@@ -1388,6 +1381,244 @@ async def handle_chat_message(
                     )
                     await websocket_manager.broadcast_to_org(org_id, ai_response)
                 else:
+                    # Fast path for Jira tickets to avoid agent loops when repo/PR info is missing
+                    if classification_label == "jira":
+                        repo_match = None
+                        pr_match = None
+                        text_for_parse = query or content or ""
+                        try:
+                            import re as _re_fast
+                            repo_match = _re_fast.search(r"([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)", text_for_parse)
+                            pr_match = _re_fast.search(r"\bpr\s*#?\s*(\d+)\b", text_for_parse, flags=_re_fast.IGNORECASE)
+                        except Exception:
+                            repo_match = None
+                            pr_match = None
+                        
+                        repo_ref = repo_match.group(1) if repo_match else None
+                        pr_ref = pr_match.group(1) if pr_match else None
+
+                        # Try to recover PR number from conversation history if not found in current message
+                        if not pr_ref and conversation_history:
+                            try:
+                                import re as _re_hist
+                                history_text = "\n".join(m.get("content", "") for m in conversation_history if m.get("content"))
+                                hist_match = _re_hist.search(r"\bpr\s*#?\s*(\d+)\b", history_text, flags=_re_hist.IGNORECASE)
+                                if hist_match:
+                                    pr_ref = hist_match.group(1)
+                            except Exception:
+                                pr_ref = pr_ref
+                        
+                        if not repo_ref:
+                            reply_text = (
+                                "I need the repository to proceed. Please provide owner/repo"
+                                f"{' (using PR #' + pr_ref + ')' if pr_ref else ''}."
+                            )
+                            processing_time = (datetime.utcnow() - start_time).total_seconds()
+                            ai_response = WebSocketMessage(
+                                type="ai_response",
+                                data={
+                                    "response": reply_text,
+                                    "sources": [],
+                                    "processing_time": processing_time,
+                                    "thread_id": message_thread_id,
+                                    "impacted_query_ids": [],
+                                    "impacted_queries": [],
+                                    "pr_repo_data": None,
+                                    "code_suggestions": None,
+                                    "jira_ticket": None,
+                                    "sender_id": "ai_assistant",
+                                    "sender_name": "QueryGuard AI",
+                                    "message_type": "assistant"
+                                },
+                                sender_id="ai_assistant",
+                                room_id=org_id
+                            )
+                            await websocket_manager.broadcast_to_org(org_id, ai_response)
+                            return ai_response
+
+                        if repo_ref and not pr_ref:
+                            # Try to fall back to the most recent PR in this repo from stored analyses
+                            fallback_pr = None
+                            try:
+                                analyses = fetch_pr_analyses_for_org(
+                                    org_id=resolved_org_id,
+                                    repo_full_name=repo_ref,
+                                    limit=1,
+                                )
+                                if analyses:
+                                    fallback_pr = analyses[0].get("pr_number")
+                            except Exception:
+                                fallback_pr = None
+                            
+                            if fallback_pr:
+                                pr_ref = str(fallback_pr)
+                            else:
+                                reply_text = f"I have the repo `{repo_ref}`. Please provide the PR number."
+                                processing_time = (datetime.utcnow() - start_time).total_seconds()
+                                ai_response = WebSocketMessage(
+                                    type="ai_response",
+                                    data={
+                                        "response": reply_text,
+                                        "sources": [],
+                                        "processing_time": processing_time,
+                                        "thread_id": message_thread_id,
+                                        "impacted_query_ids": [],
+                                        "impacted_queries": [],
+                                        "pr_repo_data": None,
+                                        "code_suggestions": None,
+                                        "jira_ticket": None,
+                                        "sender_id": "ai_assistant",
+                                        "sender_name": "QueryGuard AI",
+                                        "message_type": "assistant"
+                                    },
+                                    sender_id="ai_assistant",
+                                    room_id=org_id
+                                )
+                                await websocket_manager.broadcast_to_org(org_id, ai_response)
+                                return ai_response
+                        
+                        # Fetch PR analysis to generate proper title and description
+                        pr_analysis = None
+                        summary = f"Resolve impacted tables from PR {pr_ref or 'unknown'} in {repo_ref}"
+                        description = f"User request: {content}"
+                        pr_url = None
+                        
+                        if pr_ref and repo_ref:
+                            try:
+                                analyses = fetch_pr_analyses_for_org(
+                                    org_id=resolved_org_id,
+                                    repo_full_name=repo_ref,
+                                    pr_number=int(pr_ref),
+                                    limit=1,
+                                )
+                                if analyses:
+                                    pr_analysis = analyses[0]
+                                    pr_url = pr_analysis.get("pr_url")
+                                    analysis_data = pr_analysis.get("analysis_data", {})
+                                    pr_title = pr_analysis.get("pr_title", "")
+                                    files_data = analysis_data.get("files", []) if isinstance(analysis_data, dict) else []
+                                    
+                                    # Collect impacted tables and queries
+                                    impacted_tables = set()
+                                    impacted_queries_count = 0
+                                    for file_data in files_data:
+                                        affected_tables = file_data.get("affected_tables", [])
+                                        if isinstance(affected_tables, list):
+                                            impacted_tables.update(affected_tables)
+                                        affected_query_ids = file_data.get("affected_query_ids", [])
+                                        if isinstance(affected_query_ids, list):
+                                            impacted_queries_count += len(affected_query_ids)
+                                    
+                                    # Generate title and description using LLM
+                                    generate_prompt = f"""Based on the PR analysis data below, generate a Jira ticket title and description.
+
+PR Analysis Summary:
+- PR Title: {pr_title}
+- PR Number: {pr_ref}
+- Repository: {repo_ref}
+- Impacted Tables: {', '.join(list(impacted_tables)[:10]) if impacted_tables else 'None identified'}
+- Total Impacted Queries: {impacted_queries_count}
+- Files Changed: {len(files_data)}
+
+Generate:
+1. A concise, professional Jira ticket title (max 100 chars) that clearly indicates this is about resolving impacted tables/issues from PR {pr_ref}
+2. A detailed description that includes:
+   - Summary of the PR changes
+   - List of impacted tables (if any)
+   - Number of impacted queries
+   - Action items or next steps
+
+Respond with ONLY valid JSON in this format:
+{{
+  "summary": "Resolve impacted tables from PR {pr_ref}: [brief description]",
+  "description": "## PR Analysis Summary\\n\\n[detailed description with impacted tables, queries, and action items]"
+}}
+
+Make the title specific and actionable. Make the description comprehensive and include all relevant details from the analysis."""
+                                    
+                                    try:
+                                        llm_response = CHAT_LLM.invoke(generate_prompt)
+                                        response_text = getattr(llm_response, "content", str(llm_response))
+                                        
+                                        # Try to parse JSON from response
+                                        generated_data = None
+                                        try:
+                                            generated_data = json.loads(response_text)
+                                        except Exception:
+                                            # Try to find JSON block
+                                            start = response_text.find("{")
+                                            end = response_text.rfind("}")
+                                            if start != -1 and end != -1:
+                                                generated_data = json.loads(response_text[start:end + 1])
+                                        
+                                        if generated_data:
+                                            summary = generated_data.get("summary", summary)
+                                            description = generated_data.get("description", description)
+                                            
+                                            # Normalize description spacing and clarify no-table case
+                                            try:
+                                                import re as _re_cleanup
+                                                description = _re_cleanup.sub(r"\n{3,}", "\n\n", description or "").strip()
+                                                description = description.replace("Impacted Tables:\nNone identified", "Impacted tables: None (focus on query regressions)")
+                                                description = description.replace("Impacted Tables:\nNone", "Impacted tables: None (focus on query regressions)")
+                                            except Exception:
+                                                description = (description or "").strip()
+                                            
+                                            # Add PR URL if not already in description
+                                            if pr_analysis.get("pr_url") and pr_analysis.get("pr_url") not in description:
+                                                description += f"\n\nPR URL: {pr_analysis.get('pr_url')}"
+                                    except Exception as e:
+                                        logger.warning(f"Failed to generate title/description from PR analysis: {e}")
+                                        # Fallback: use basic title/description
+                                        summary = f"Resolve impacted tables from PR {pr_ref} in {repo_ref}"
+                                        description = f"PR Analysis for PR {pr_ref} in {repo_ref}.\n\nImpacted Queries: {impacted_queries_count}\nImpacted Tables: {', '.join(list(impacted_tables)[:10]) if impacted_tables else 'None identified'}"
+                            except Exception as e:
+                                logger.warning(f"Failed to fetch PR analysis: {e}")
+                                # Continue with default summary/description
+                        
+                        result = create_jira_ticket_for_org(
+                            org_id=resolved_org_id,
+                            summary=summary,
+                            description=description,
+                            pr_url=pr_analysis.get("pr_url") if pr_analysis else None,
+                            user_id=str(current_user.id) if current_user else None,
+                        )
+                        
+                        if "error" in result:
+                            reply_text = result.get("error")
+                        else:
+                            ticket = result.get("ticket", {})
+                            issue = result.get("jira_issue", {})
+                            parts = [f"Jira ticket created: {issue.get('key') or ticket.get('ticket_key', '')}".strip()]
+                            if issue.get("url"):
+                                parts.append(f"URL: {issue['url']}")
+                            if ticket.get("ticket_url"):
+                                parts.append(f"URL: {ticket['ticket_url']}")
+                            reply_text = "\n".join([p for p in parts if p])
+                        
+                        processing_time = (datetime.utcnow() - start_time).total_seconds()
+                        ai_response = WebSocketMessage(
+                            type="ai_response",
+                            data={
+                                "response": reply_text,
+                                "sources": [],
+                                "processing_time": processing_time,
+                                "thread_id": message_thread_id,
+                                "impacted_query_ids": [],
+                                "impacted_queries": [],
+                                "pr_repo_data": None,
+                                "code_suggestions": None,
+                                "jira_ticket": result if "error" not in result else None,
+                                "sender_id": "ai_assistant",
+                                "sender_name": "QueryGuard AI",
+                                "message_type": "assistant"
+                            },
+                            sender_id="ai_assistant",
+                            room_id=org_id
+                        )
+                        await websocket_manager.broadcast_to_org(org_id, ai_response)
+                        return ai_response
+
                     # Build org-aware tools and delegate tool selection to the LLM agent
                     lineage_tool = build_org_lineage_tool(org_id=resolved_org_id, k=k)
                     query_history_tool = build_org_query_history_tool(org_id=resolved_org_id, max_iters=5)
@@ -1432,7 +1663,7 @@ async def handle_chat_message(
                         "BEHAVIOR:\n"
                         "- Be concise and helpful.\n"
                         f"{conversation_note}"
-                        "- CRITICAL: If a tool returns 'NO DATA FOUND' or indicates no data is available, you MUST tell the user that no data was found. DO NOT make up or assume information.\n"
+                        "- CRITICAL: If a tool returns 'NO DATA FOUND' or indicates no data is available, you MUST tell the user that no data was found. DO NOT make up or assume information. For PR/Jira flows, immediately ask the user for the repository (owner/repo) and PR number so you can retry instead of ending the conversation.\n"
                         "- CRITICAL: If the create_jira_ticket tool returns 'JIRA CONNECTION NOT CONFIGURED' or 'JIRA ERROR', you MUST inform the user that Jira is not set up. DO NOT try other tools - this is a configuration issue, not a data issue.\n"
                         "- DO NOT hallucinate lineage relationships, impacted queries, or any data that isn't explicitly returned by the tools.\n"
                         "- DO NOT try alternative tools when a tool fails due to configuration issues (like missing Jira connection).\n"
@@ -1440,6 +1671,9 @@ async def handle_chat_message(
                         "- If the question is about schema/column changes or 'impacted queries', you MUST use the query_history_search tool.\n"
                         "- When reporting impacted queries, return a concise, numbered list with a short SQL preview for each query, not just IDs.\n"
                         "- If it's a pure lineage question, use the extract_lineage tool.\n"
+                        "- If you already suggested a repo/PR and the user replies affirmatively (e.g., 'yes', 'that repo'), assume that repo/PR and proceed with create_jira_ticket instead of asking again.\n"
+                        "- If you do NOT have repo/PR details, ask for them once (owner/repo and PR number) and wait; do not loop or re-ask in the same turn.\n"
+                        "- If the agent hits iteration or time limits, stop and respond with a concise ask for the missing repo/PR details instead of repeating prompts.\n"
                         "- If the question is about PR analysis or repository information, use the pr_repo_analysis tool.\n"
                         "- If the question asks for code suggestions, fixes, or changes needed based on PR analysis, use the code_suggestion tool.\n"
                         "- If the question asks to create a Jira ticket, use the create_jira_ticket tool.\n"
