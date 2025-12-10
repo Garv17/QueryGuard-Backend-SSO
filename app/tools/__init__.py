@@ -5,6 +5,8 @@ from .lineage import (
     build_org_query_history_tool,
     CHAT_LLM,
 )
+# Import LLM and CODE_SUGGESTION_LLM from vector_db for convenience
+from app.vector_db import LLM, CODE_SUGGESTION_LLM
 from .pr_repo import (
     fetch_pr_analyses_for_org,
     fetch_repo_tree,
@@ -44,6 +46,8 @@ __all__ = [
     "create_jira_ticket_for_org",
     "build_org_jira_tool",
     "CHAT_LLM",
+    "LLM",
+    "CODE_SUGGESTION_LLM",
 ]
 
 

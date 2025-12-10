@@ -18,7 +18,11 @@ embedding = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", go
 # Gemini LLM for existing functionality (impact analysis, etc.)
 LLM = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=GOOGLE_API_KEY, temperature=0.2)
 # OpenAI LLM specifically for chatbot/agents
+# Use gpt-4o-mini for general chat
 CHAT_LLM = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+# Use OpenAI GPT-4o for code generation tasks (code suggestions only) - better at following structured instructions
+# Valid models: gpt-4o, gpt-4-turbo, gpt-4o-mini (use gpt-4o-mini if gpt-4o requires verification)
+CODE_SUGGESTION_LLM = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 
 from langchain_community.vectorstores import Chroma
@@ -190,10 +194,25 @@ def get_retriever(org_id: str, k: int = 8):
     return db.as_retriever(search_kwargs={"k": k})
 
 
-def get_qa_chain(org_id: str, k: int = 5):
+def get_qa_chain(org_id: str, k: int = 5, llm=None):
+    """
+    Get a QA chain for the given org_id.
+    
+    Args:
+        org_id: Organization ID
+        k: Number of documents to retrieve
+        llm: Optional LLM to use. If None, defaults to LLM (Gemini) for backward compatibility.
+             For chatbot tools, pass CHAT_LLM (GPT-4o-mini).
+    
+    Returns:
+        RetrievalQA chain
+    """
+    if llm is None:
+        llm = LLM  # Default to Gemini for backward compatibility (non-chatbot usage)
+    
     retriever = get_retriever(org_id, k=k)
     qa_chain = RetrievalQA.from_chain_type(
-        llm=LLM,
+        llm=llm,
         retriever=retriever,
         return_source_documents=True,
     )

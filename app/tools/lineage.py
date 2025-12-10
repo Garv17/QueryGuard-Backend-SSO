@@ -903,7 +903,7 @@ def get_lineage_answer_for_org(org_id: str, question: str, k: int = 8, original_
         else:
             # Simple downstream query
             logger.info("Using simple downstream lineage extraction for question: %s", question[:100])
-            qa = get_qa_chain(org_id=org_id, k=k)
+            qa = get_qa_chain(org_id=org_id, k=k, llm=CHAT_LLM)  # Use CHAT_LLM for chatbot tools
             result: Dict[str, Any] = qa.invoke({"query": question})
             answer = result.get("result", "") or result.get("answer", "")
             source_docs = result.get("source_documents", []) or []
@@ -926,7 +926,7 @@ def get_lineage_answer_for_org(org_id: str, question: str, k: int = 8, original_
             return (answer or "No answer found.") + sources_block
     
     # Simple QA chain for basic lineage questions
-    qa = get_qa_chain(org_id=org_id, k=k)
+    qa = get_qa_chain(org_id=org_id, k=k, llm=CHAT_LLM)  # Use CHAT_LLM for chatbot tools
     result: Dict[str, Any] = qa.invoke({"query": question})
     answer = result.get("result", "") or result.get("answer", "")
     source_docs = result.get("source_documents", []) or []
