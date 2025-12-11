@@ -60,7 +60,11 @@
         "responses": {
           "200": {
             "description": "Successful Response",
-            "content": { "application/json": { "schema": {} } }
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LoginResponse" }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -140,6 +144,37 @@
           "200": {
             "description": "Successful Response",
             "content": { "application/json": { "schema": {} } }
+          }
+        },
+        "security": [{ "HTTPBearer": [] }]
+      }
+    },
+    "/auth/change-password": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Change Password",
+        "description": "Change password for authenticated user.\nRequires current password verification and sets new password.",
+        "operationId": "change_password_auth_change_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ChangePassword" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
           }
         },
         "security": [{ "HTTPBearer": [] }]
@@ -640,6 +675,37 @@
         "security": [{ "HTTPBearer": [] }]
       }
     },
+    "/snowflake/connections/{connection_id}": {
+      "delete": {
+        "tags": ["Snowflake"],
+        "summary": "Deactivate Connection",
+        "description": "Deactivate a Snowflake connection (soft delete)",
+        "operationId": "deactivate_connection_snowflake_connections__connection_id__delete",
+        "security": [{ "HTTPBearer": [] }],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Connection Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": {} } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/snowflake/fetch-databases/{connection_id}": {
       "get": {
         "tags": ["Snowflake"],
@@ -1021,8 +1087,11 @@
           {
             "name": "installation_id",
             "in": "query",
-            "required": true,
-            "schema": { "type": "string", "title": "Installation Id" }
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "Installation Id"
+            }
           },
           {
             "name": "setup_action",
@@ -1245,7 +1314,7 @@
       "get": {
         "tags": ["GitHub"],
         "summary": "Get Pr Analysis",
-        "description": "Fetch stored PR analysis by its UUID",
+        "description": "Fetch stored PR analysis by its UUID with enhanced lineage data",
         "operationId": "get_pr_analysis_github_analyses__analysis_id__get",
         "security": [{ "HTTPBearer": [] }],
         "parameters": [
@@ -2230,6 +2299,15 @@
   },
   "components": {
     "schemas": {
+      "ChangePassword": {
+        "properties": {
+          "current_password": { "type": "string", "title": "Current Password" },
+          "new_password": { "type": "string", "title": "New Password" }
+        },
+        "type": "object",
+        "required": ["current_password", "new_password"],
+        "title": "ChangePassword"
+      },
       "ChatConversation": {
         "properties": {
           "conversation_id": { "type": "string", "title": "Conversation Id" },
@@ -2943,6 +3021,29 @@
         "type": "object",
         "required": ["total_organizations", "total_users", "organizations"],
         "title": "KPIMetadata"
+      },
+      "LoginResponse": {
+        "properties": {
+          "access_token": { "type": "string", "title": "Access Token" },
+          "token_type": { "type": "string", "title": "Token Type" },
+          "is_connection_setup": {
+            "type": "boolean",
+            "title": "Is Connection Setup"
+          },
+          "missing_connectors": {
+            "items": { "type": "string" },
+            "type": "array",
+            "title": "Missing Connectors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "token_type",
+          "is_connection_setup",
+          "missing_connectors"
+        ],
+        "title": "LoginResponse"
       },
       "OrganizationCreate": {
         "properties": {
