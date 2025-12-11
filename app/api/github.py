@@ -317,6 +317,133 @@ def get_downstream_lineage(
     return result
 
 
+def get_recursive_downstream_lineage(
+    db: Session,
+    org_id: UUID,
+    source_database: Optional[str],
+    source_schema: Optional[str],
+    source_table: str,
+    source_column: Optional[str] = None,
+    max_depth: int = 10,
+    visited_nodes: Optional[set] = None,
+    seen_records: Optional[set] = None
+) -> List[dict]:
+    """
+    Recursively query downstream lineage (multi-hop dependencies).
+    Traverses the lineage graph to find all downstream dependencies at any depth.
+    Uses case-insensitive matching for table/column names.
+    Deduplicates records to prevent the same lineage relationship from appearing multiple times.
+    
+    Args:
+        db: Database session
+        org_id: Organization ID
+        source_database: Source database name (optional)
+        source_schema: Source schema name (optional)
+        source_table: Source table name
+        source_column: Source column name (optional)
+        max_depth: Maximum depth to traverse (default: 10)
+        visited_nodes: Set of visited (table, column) tuples to prevent cycles
+        seen_records: Set of seen lineage record keys to prevent duplicates
+    
+    Returns:
+        List of all downstream lineage records (all depths combined, deduplicated)
+    """
+    if visited_nodes is None:
+        visited_nodes = set()
+    if seen_records is None:
+        seen_records = set()
+    
+    if max_depth <= 0:
+        return []
+    
+    # Create a key for this node to track visited nodes (prevents cycles)
+    node_key = (
+        (source_database or "").lower(),
+        (source_schema or "").lower(),
+        source_table.lower(),
+        (source_column or "").lower()
+    )
+    
+    if node_key in visited_nodes:
+        # Cycle detected, return empty to prevent infinite recursion
+        return []
+    
+    visited_nodes.add(node_key)
+    
+    # Get direct downstream dependencies (1-hop)
+    direct_downstream = get_downstream_lineage(
+        db=db,
+        org_id=org_id,
+        source_database=source_database,
+        source_schema=source_schema,
+        source_table=source_table,
+        source_column=source_column
+    )
+    
+    # Filter and deduplicate direct downstream records
+    unique_direct_downstream = []
+    for record in direct_downstream:
+        # Create a unique key for this lineage record
+        record_key = (
+            record.get("source_database", "").lower(),
+            record.get("source_schema", "").lower(),
+            record.get("source_table", "").lower(),
+            record.get("source_column", "").lower(),
+            record.get("target_database", "").lower(),
+            record.get("target_schema", "").lower(),
+            record.get("target_table", "").lower(),
+            record.get("target_column", "").lower(),
+        )
+        
+        # Only add if we haven't seen this exact lineage relationship before
+        if record_key not in seen_records:
+            seen_records.add(record_key)
+            unique_direct_downstream.append(record)
+    
+    # Start with unique direct downstream records
+    all_downstream = unique_direct_downstream.copy()
+    
+    # For each unique target table, recursively get its downstream dependencies
+    # Group by target table to avoid redundant recursive calls
+    target_tables_seen = set()
+    for record in unique_direct_downstream:
+        target_db = record.get("target_database")
+        target_schema = record.get("target_schema")
+        target_table = record.get("target_table")
+        
+        # Create a key for this target table
+        target_table_key = (
+            (target_db or "").lower(),
+            (target_schema or "").lower(),
+            target_table.lower()
+        )
+        
+        # Only recursively query each target table once (not per column)
+        # This ensures we get ALL downstream dependencies of the table, not just specific columns
+        if target_table_key not in target_tables_seen:
+            target_tables_seen.add(target_table_key)
+            
+            # Recursively get downstream for this target table
+            # Pass source_column=None to get ALL columns of this table's downstream dependencies
+            # Pass the same seen_records set to ensure deduplication across all recursive calls
+            nested_downstream = get_recursive_downstream_lineage(
+                db=db,
+                org_id=org_id,
+                source_database=target_db,
+                source_schema=target_schema,
+                source_table=target_table,
+                source_column=None,  # Query ALL columns to get complete downstream
+                max_depth=max_depth - 1,
+                visited_nodes=visited_nodes.copy(),  # Copy for cycle detection (allows different paths)
+                seen_records=seen_records  # Share the same set to prevent duplicates
+            )
+            
+            # Add nested downstream results (already deduplicated by seen_records)
+            all_downstream.extend(nested_downstream)
+    
+    return all_downstream
+
+
 # --- Endpoints ---
 @router.get("/install")
 def github_install(org_id: str, request: Request):
@@ -957,7 +1084,10 @@ def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_u
                 target_table = metadata_entry.get("target_table")
                 target_column = metadata_entry.get("target_column")
                 
-                # Query lineage to find the source for this target
+                # Query lineage to find the ACTUAL DIRECT source for this target
+                # IMPORTANT: Do NOT filter by changed_table/changed_column here, as this target
+                # may be at depth 2+ and its direct source is an intermediate table, not the changed table.
+                # We want to find the actual direct dependency chain, not force it to match the changed table.
                 lineage_match = db.query(ColumnLevelLineage).filter(
                     ColumnLevelLineage.org_id == analysis.org_id,
                     ColumnLevelLineage.is_active == 1,
@@ -973,15 +1103,10 @@ def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_u
                     lineage_match = lineage_match.filter(
                         func.lower(ColumnLevelLineage.target_schema) == func.lower(target_schema)
                     )
-                if changed_table:
-                    lineage_match = lineage_match.filter(
-                        func.lower(ColumnLevelLineage.source_table) == func.lower(changed_table)
-                    )
-                if changed_column:
-                    lineage_match = lineage_match.filter(
-                        func.lower(ColumnLevelLineage.source_column) == func.lower(changed_column)
-                    )
                 
+                # Get the first matching record (the direct source for this target)
+                # Note: If there are multiple sources for the same target, we take the first one.
+                # In practice, there should typically be one direct source per target column.
                 lineage_record = lineage_match.first()
                 
                 if lineage_record:
@@ -1033,8 +1158,9 @@ def get_pr_analysis(analysis_id: str, current_user: User = Depends(get_current_u
                 complete_lineage["upstream"] = upstream_lineage
                 
                 # Get downstream lineage (what the changed table feeds into)
+                # Use recursive function to get multi-hop downstream dependencies
                 # Query ALL columns for this table (not just the changed column)
-                downstream_lineage = get_downstream_lineage(
+                downstream_lineage = get_recursive_downstream_lineage(
                     db=db,
                     org_id=analysis.org_id,
                     source_database=None,  # Query all databases for this table
