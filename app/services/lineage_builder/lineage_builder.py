@@ -757,7 +757,7 @@ def lineage_builder(org_id, conn_id, batch_id):
             )
         logger.info("Query IDs converted to strings")
        
-        final_df.to_csv("C:/Users/User/Downloads/12-09-2025/final_df.csv", index=False)
+        final_df.to_csv("C:/Users/User/Documents/12-09-2025_lineage_final/final_df.csv", index=False)
         logger.info("final_df saved as csv")
 
         consolidated_df = consolidate_lineage(all_lineages, all_edges)
@@ -773,7 +773,7 @@ def lineage_builder(org_id, conn_id, batch_id):
         consolidated_df["query_id"] = consolidated_df["query_id"].apply(
                 lambda x: str(x) if isinstance(x, list) else x
             )
-        consolidated_df.to_csv("C:/Users/User/Downloads/12-09-2025/consolidated_df.csv", index=False)
+        consolidated_df.to_csv("C:/Users/User/Documents/12-09-2025_lineage_final/consolidated_df.csv", index=False)
         logger.info("Consolidated_df saved as csv")
         logger.info("Consolidated query IDs converted to strings")
 
@@ -840,8 +840,7 @@ def lineage_builder(org_id, conn_id, batch_id):
         #         logger.info("Added org_id, connection_id, and batch_id columns to final_filter_clause_df")
         # else:
         #     final_filter_clause_df = pd.DataFrame()
-        
-        final_filter_clause_df.to_csv("C:/Users/User/Downloads/12-09-2025/final_filter_clause_df.csv", index=False)
+        final_filter_clause_df.to_csv("C:/Users/User/Documents/12-09-2025_lineage_final/final_filter_clause_df.csv", index=False)
         logger.info("final_filter_clause_df saved as csv")
 
 
@@ -913,8 +912,351 @@ def lineage_builder(org_id, conn_id, batch_id):
 
 
 
+if __name__ == "__main__":
+    org_id = "76d33fb3-6062-456b-a211-4aec9971f8be"
+    batch_id = "32f55d8f-4731-4810-aeb8-4cec0d5ae989"
+    connection_id = "4aeb318b-6819-4873-9fae-33bab55ac922"
+    lineage_builder(org_id, connection_id, batch_id)
+#     consolidated_df = pd.read_csv("C:/Users/User/Documents/lineage_files/11-28-2025/consolidated_df.csv")
+#     final_df = pd.read_csv("C:/Users/User/Documents/lineage_files/11-28-2025/final_df.csv")
+#     # final_df['base_objects_accessed'] = final_df['base_objects_accessed'].apply(ast.literal_eval)
+#     logger.info("Base objects accessed parsed successfully")
+#     filter_clause_df = pd.merge(consolidated_df, final_df, on="query_id", how="inner")
+#     logger.info("Filter clause DataFrame merged, %d records", len(filter_clause_df))
+    
+#     rows = get_dependent_columns(filter_clause_df)
+#     logger.info("Dependent columns extracted, %d rows", len(rows) if rows else 0)
+
+#     if rows:
+#         final_filter_clause_df = pd.DataFrame(rows)
+#         final_filter_clause_df.drop_duplicates(
+#         subset=[
+#             "source_database", "source_schema", "source_table", "source_column",
+#             "target_database", "target_schema", "target_table", "target_column"
+#         ],
+#         inplace=True
+#         )
+#         mask = ~(
+#         final_filter_clause_df["source_database"].fillna("").eq("") &
+#         final_filter_clause_df["source_schema"].fillna("").eq("")
+#         )
+
+#         final_filter_clause_df = final_filter_clause_df[mask]
+        
+#         # Add required columns for SCD Type 2 processing
+#         if not final_filter_clause_df.empty:
+#             final_filter_clause_df["org_id"] = org_id
+#             final_filter_clause_df["connection_id"] = connection_id
+#             final_filter_clause_df["batch_id"] = batch_id
+#             logger.info("Added org_id, connection_id, and batch_id columns to final_filter_clause_df")
+#     else:
+#         final_filter_clause_df = pd.DataFrame()
+
+#     final_filter_clause_df.to_csv("C:/Users/User/Documents/lineage_files/11-28-2025/final_filter_clause_df.csv", index=False)
+#     logger.info("final_filter_clause_df saved as csv")
+
+
+# sql = """
+# create or replace  temporary view PROD_RCZ.yardi_replicate.PROSPECT__dbt_tmp  
+#   as (
+# SELECT
+#     "b50059" AS B50059,
+#     "bILS" AS BILS,
+#     "bNoMiddleName" AS BNOMIDDLENAME,
+#     "bPrevRentOrOwn" AS BPREVRENTOROWN,
+#     "dCurAddrMonthlyMortPayment" AS DCURADDRMONTHLYMORTPAYMENT,
+#     "dPrefRent" AS DPREFRENT,
+#     "dtApprove" AS DTAPPROVE,
+#     "dtFirstContact" AS DTFIRSTCONTACT,
+#     "hParent" AS HPARENT,
+#     "bLocalProgram" AS BLOCALPROGRAM,
+#     "dCurAddrMonthlyRent" AS DCURADDRMONTHLYRENT,
+#     "dHowLong" AS DHOWLONG,
+#     "dIncome" AS DINCOME,
+#     "dtCreated" AS DTCREATED,
+#     "dtCurAddrStart" AS DTCURADDRSTART,
+#     "dtEndDatePrevEmployer" AS DTENDDATEPREVEMPLOYER,
+#     "iLeaseReady" AS ILEASEREADY,
+#     "sAddr1" AS SADDR1,
+#     "sAddr3" AS SADDR3,
+#     "sDriversLicenseSecure" AS SDRIVERSLICENSESECURE,
+#     "sEmergAddr2" AS SEMERGADDR2,
+#     "sEmergRelation" AS SEMERGRELATION,
+#     "sEmpSupervisorName" AS SEMPSUPERVISORNAME,
+#     "sPrevAddrApartmentCommunity" AS SPREVADDRAPARTMENTCOMMUNITY,
+#     "iTypeofAddIncome" AS ITYPEOFADDINCOME,
+#     "sEnvelopeId" AS SENVELOPEID,
+#     "sPrevEmpPosition" AS SPREVEMPPOSITION,
+#     "sCardType" AS SCARDTYPE,
+#     "sDutyStation" AS SDUTYSTATION,
+#     "hHubProperty" AS HHUBPROPERTY,
+#     "hBed" AS HBED,
+#     "sEmpPhone" AS SEMPPHONE,
+#     "sTelAlt" AS STELALT,
+#     "dtLeaseTo" AS DTLEASETO,
+#     "iType" AS ITYPE,
+#     "sCurAddrReasonForMoving" AS SCURADDRREASONFORMOVING,
+#     "sPrev2City" AS SPREV2CITY,
+#     "sPrevAddrMgmtCompany" AS SPREVADDRMGMTCOMPANY,
+#     "sSecondarySource" AS SSECONDARYSOURCE,
+#     "bEarnestMoneyAcknowledged" AS BEARNESTMONEYACKNOWLEDGED,
+#     "bSmoke" AS BSMOKE,
+#     "bsuedfordamage" AS BSUEDFORDAMAGE,
+#     "bsuedforrent" AS BSUEDFORRENT,
+#     "bUSArmyForces" AS BUSARMYFORCES,
+#     "dEmpAddlIncome" AS DEMPADDLINCOME,
+#     "dtPrevAddrStart" AS DTPREVADDRSTART,
+#     "hEmergCountry" AS HEMERGCOUNTRY,
+#     "bNoSSN" AS BNOSSN,
+#     "sAutoColor1" AS SAUTOCOLOR1,
+#     "sAutoColor2" AS SAUTOCOLOR2,
+#     "sAutoType4" AS SAUTOTYPE4,
+#     "sNickName" AS SNICKNAME,
+#     "sTelCell" AS STELCELL,
+#     "iOccupantAppForApprovedApplicationStatus" AS IOCCUPANTAPPFORAPPROVEDAPPLICATIONSTATUS,
+#     "sEmpAddlIncomeSource" AS SEMPADDLINCOMESOURCE,
+#     "sPrevEmpAddr1" AS SPREVEMPADDR1,
+#     "sPrevEmpCity" AS SPREVEMPCITY,
+#     "sPrevZip" AS SPREVZIP,
+#     "iAffLeaseStep" AS IAFFLEASESTEP,
+#     "sautolicense3" AS SAUTOLICENSE3,
+#     "sPrevEmpSupervisorName" AS SPREVEMPSUPERVISORNAME,
+#     "dAutoYear3" AS DAUTOYEAR3,
+#     "hInterfaceConfig" AS HINTERFACECONFIG,
+#     "sEmergTelOffice" AS SEMERGTELOFFICE,
+#     "sautostate3" AS SAUTOSTATE3,
+#     "sScreIsConvictedFelonyDetail" AS SSCREISCONVICTEDFELONYDETAIL,
+#     "bIsPreQualified" AS BISPREQUALIFIED,
+#     "bSubsidized" AS BSUBSIDIZED,
+#     "bWeblinks" AS BWEBLINKS,
+#     "dPrevIncome" AS DPREVINCOME,
+#     "sEmpAddr1" AS SEMPADDR1,
+#     "sStatus" AS SSTATUS,
+#     "dPreQualifiedAmount" AS DPREQUALIFIEDAMOUNT,
+#     "dtDeny" AS DTDENY,
+#     b.DTDOBSECURED AS DTDOBSECURE,
+#     "hPrevCountry" AS HPREVCOUNTRY,
+#     "iLeadStage" AS ILEADSTAGE,
+#     "sCity" AS SCITY,
+#     "sEmergAddr4" AS SEMERGADDR4,
+#     "sFedIdSecure" AS SFEDIDSECURE,
+#     "sLeadxRef" AS SLEADXREF,
+#     "sPrevAddr4" AS SPREVADDR4,
+#     "sPrevEmpPhone" AS SPREVEMPPHONE,
+#     "sRank" AS SRANK,
+#     "sSalutation" AS SSALUTATION,
+#     "sScreCriminalChgPending" AS SSCRECRIMINALCHGPENDING,
+#     "sScreIsConvictedFelony" AS SSCREISCONVICTEDFELONY,
+#     "hProspectCopiedTo" AS HPROSPECTCOPIEDTO,
+#     "hUserModifiedBy" AS HUSERMODIFIEDBY,
+#     "sAutoModel1" AS SAUTOMODEL1,
+#     "sEmpPosition" AS SEMPPOSITION,
+#     "sNotes" AS SNOTES,
+#     "sPrev2State" AS SPREV2STATE,
+#     "sPrevAddr30DayNoticeGiven" AS SPREVADDR30DAYNOTICEGIVEN,
+#     "sRelationship" AS SRELATIONSHIP,
+#     CAST("hTenant" AS NUMBER(18,0)) AS HTENANT, -- Using NUMBER(18,0) as per DDL
+#     "dtPrevEmpEnd" AS DTPREVEMPEND,
+#     "sAddr2" AS SADDR2,
+#     "sAutoColor3" AS SAUTOCOLOR3,
+#     "sDLState" AS SDLSTATE,
+#     "sPrefCafeFloorPlan" AS SPREFCAFEFLOORPLAN,
+#     "sPrevAddr1" AS SPREVADDR1,
+#     "iTypeofPrevEmpAddlIncome" AS SPREVEMPADDLINCOMESOURCE, -- Aliasing DDL name to match SQL Server select
+#     "sPrevEmpCompany" AS SPREVEMPCOMPANY,
+#     "bOnlineLease" AS BONLINELEASE,
+#     "bStudent" AS BSTUDENT,
+#     "dAutoYear4" AS DAUTOYEAR4,
+#     "dtPreQualified" AS DTPREQUALIFIED,
+#     "hMy" AS HMY,
+#     "hUserCreatedBy" AS HUSERCREATEDBY,
+#     "bOccupantAppForApprovedApplication" AS BOCCUPANTAPPFORAPPROVEDAPPLICATION,
+#     "dtCancel" AS DTCANCEL,
+#     "dtDOB" AS DTDOB,
+#     "dtEndDatePrevAddress" AS DTENDDATEPREVADDRESS,
+#     "iIdVerifyattempt" AS IIDVERIFYATTEMPT,
+#     "sCardNum" AS SCARDNUM,
+#     "sScreIsEvictedDetail" AS SSCREISEVICTEDDETAIL,
+#     "hGuarantor" AS HGUARANTOR,
+#     "hProperty" AS HPROPERTY,
+#     "sAutoLicense2" AS SAUTOLICENSE2,
+#     "sAutoState2" AS SAUTOSTATE2,
+#     "sEmpCity" AS SEMPCITY,
+#     "sEmploymentStatus" AS SEMPLOYMENTSTATUS,
+#     "sPrev2Zip" AS SPREV2ZIP,
+#     "sPrevAddr2" AS SPREVADDR2,
+#     "sSource" AS SSOURCE,
+#     "sSuffixName" AS SSUFFIXNAME,
+#     "tRowVersion" AS TROWVERSION,
+#     "sLandlordLenderName" AS SLANDLORDLENDERNAME,
+#     "sMaidenName" AS SMAIDENNAME,
+#     "sPrevEmpZip" AS SPREVEMPZIP,
+#     "sEmergState" AS SEMERGSTATE,
+#     "dtApply" AS DTAPPLY,
+#     "dtEmpStart" AS DTEMPSTART,
+#     "sLastName" AS SLASTNAME,
+#     "iPreQualifyStatus" AS IPREQUALIFYSTATUS,
+#     "sautolicense4" AS SAUTOLICENSE4,
+#     "sScreIsEvicted" AS SSCREISEVICTED,
+#     "sState" AS SSTATE,
+#     "sCurAddrMgmtCompanyPhone" AS SCURADDRMGMTCOMPANYPHONE,
+#     "bDoNotChargeEM" AS BDONOTCHARGEEM,
+#     "bFailValidation" AS BFAILVALIDATION,
+#     "dtGovCardExpdate" AS DTGOVCARDEXPDATE,
+#     "hProspectCopiedFrom" AS HPROSPECTCOPIEDFROM,
+#     "hRentcafeId" AS HRENTCAFEID,
+#     "iLeaseTerm" AS ILEASETERM,
+#     "sEMail" AS SEMAIL,
+#     "dtEarnestMoneyAcknowledged" AS DTEARNESTMONEYACKNOWLEDGED,
+#     "dtLeaseFrom" AS DTLEASEFROM,
+#     "hAgent" AS HAGENT,
+#     "sAutoState1" AS SAUTOSTATE1,
+#     "sautostate4" AS SAUTOSTATE4,
+#     "sAutoType3" AS SAUTOTYPE3,
+#     "sFedId" AS SFEDID,
+#     "sFormerName" AS SFORMERNAME,
+#     "sPrevAddrReasonForMoving" AS SPREVADDRREASONFORMOVING,
+#     "sCreditProblems" AS SCREDITPROBLEMS,
+#     "sCurAddrApartmentCommunity" AS SCURADDRAPARTMENTCOMMUNITY,
+#     "sCurAddrMgmtCompany" AS SCURADDRMGMTCOMPANY,
+#     "sPrev2Addr1" AS SPREV2ADDR1,
+#     "sPrevCity" AS SPREVCITY,
+#     "sPrevState" AS SPREVSTATE,
+#     "sReferral" AS SREFERRAL,
+#     "sAutoModel4" AS SAUTOMODEL4,
+#     "sEmergEmail" AS SEMERGEMAIL,
+#     "sAgent" AS SAGENT,
+#     "sMaritalStatus" AS SMARITALSTATUS,
+#     "sPrevAddr3" AS SPREVADDR3,
+#     "hPMDocID" AS HPMDOCID,
+#     "sDriversLicense" AS SDRIVERSLICENSE,
+#     "sEmergCity" AS SEMERGCITY,
+#     "bbankruptcy" AS BBANKRUPTCY,
+#     "bmoved_leaseviolation" AS BMOVED_LEASEVIOLATION,
+#     "bNoDrivLicense" AS BNODRIVLICENSE,
+#     "bRemovedFromCRMQueue" AS BREMOVEDFROMCRMQUEUE,
+#     "dPrevAddrMonthlyRent" AS DPREVADDRMONTHLYRENT,
+#     "sEmergTelCell" AS SEMERGTELCELL,
+#     "sExtReference" AS SEXTREFERENCE,
+#     "dAutoYear2" AS DAUTOYEAR2,
+#     "dPrevEmpAddlIncome" AS DPREVEMPADDLINCOME,
+#     "dtEndDateCurrEmployer" AS DTENDDATECURREMPLOYER,
+#     "iIdVerifyStatus" AS IIDVERIFYSTATUS,
+#     "iLeadScore" AS ILEADSCORE,
+#     "iRentCafeReach" AS IRENTCAFEREACH,
+#     "sScreCriminalChgPendingDetail" AS SSCRECRIMINALCHGPENDINGDETAIL,
+#     "dtCardExpiration" AS DTCARDEXPIRATION,
+#     "sAutoModel3" AS SAUTOMODEL3,
+#     "sAutoType1" AS SAUTOTYPE1,
+#     "sEmergPhone" AS SEMERGPHONE,
+#     "sEmergTelHome" AS SEMERGTELHOME,
+#     "sEmergZip" AS SEMERGZIP,
+#     "sPrevAddrMgmtCompanyPhone" AS SPREVADDRMGMTCOMPANYPHONE,
+#     "sTelHome" AS STELHOME,
+#     "sTelOffice" AS STELOFFICE,
+#     "hSummary" AS HSUMMARY,
+#     "hApplicant" AS HAPPLICANT,
+#     "sEMail2" AS SEMAIL2,
+#     "sEmergAddr1" AS SEMERGADDR1,
+#     "sFirstName" AS SFIRSTNAME,
+#     "sMiddleName" AS SMIDDLENAME,
+#     "sFirstContactType" AS SFIRSTCONTACTTYPE,
+#     "sPrevEmpState" AS SPREVEMPSTATE,
+#     "sService" AS SSERVICE,
+#     "bCurrRentOrOwn" AS BCURRRENTOROWN,
+#     "bEarnestMoneyPaid" AS BEARNESTMONEYPAID,
+#     "bTaxCr" AS BTAXCR,
+#     "dPayment" AS DPAYMENT,
+#     "dPrefBath" AS DPREFBATH,
+#     "dtCreatedUTC" AS DTCREATEDUTC,
+#     "dtLastModified" AS DTLASTMODIFIED,
+#     "dtStatus" AS DTSTATUS,
+#     "sAutoLicense1" AS SAUTOLICENSE1,
+#     "sAutoModel2" AS SAUTOMODEL2,
+#     "dAutoYear1" AS DAUTOYEAR1,
+#     "dPrevHowLong" AS DPREVHOWLONG,
+#     "hforeigndb" AS HFOREIGNDB,
+#     "hMergedFrom" AS HMERGEDFROM,
+#     "iLeaseStep" AS ILEASESTEP,
+#     "iPreferredMoC" AS IPREFERREDMOC,
+#     "sAutoType2" AS SAUTOTYPE2,
+#     "sEmergName" AS SEMERGNAME,
+#     "sZip" AS SZIP,
+#     "iOccupantType" AS IOCCUPANTTYPE,
+#     "SCurAddr30DayNoticeGiven" AS SCURADDR30DAYNOTICEGIVEN,
+#     "sEmergAddr3" AS SEMERGADDR3,
+#     "sEmpCompany" AS SEMPCOMPANY,
+#     "sGovCardType" AS SGOVCARDTYPE,
+#     "sRentcafeCode" AS SRENTCAFECODE,
+#     "hRentcafeParentID" AS HRENTCAFEPARENTID,
+#     "hUnit" AS HUNIT,
+#     "iEMAttempts" AS IEMATTEMPTS,
+#     "sAddr4" AS SADDR4,
+#     "sCode" AS SCODE,
+#     "sEmpState" AS SEMPSTATE,
+#     "sSignStatus" AS SSIGNSTATUS,
+#     "bbrokenrentalagreement" AS BBROKENRENTALAGREEMENT,
+#     "bFormerName" AS BFORMERNAME,
+#     "bHome" AS BHOME,
+#     "bOccupant" AS BOCCUPANT,
+#     "bRD" AS BRD,
+#     "dtAppSubmit" AS DTAPPSUBMIT,
+#     "dtPayDate" AS DTPAYDATE,
+#     "iWeblinksStep" AS IWEBLINKSSTEP,
+#     "dPrefBedrooms" AS DPREFBEDROOMS,
+#     "dPrevAddrMonthlyMortPayment" AS DPREVADDRMONTHLYMORTPAYMENT,
+#     "dQuotedRent" AS DQUOTEDRENT,
+#     "dtEndDateCurrAddress" AS DTENDDATECURRADDRESS,
+#     "dtShow" AS DTSHOW,
+#     "hCustomer" AS HCUSTOMER,
+#     "hRoom" AS HROOM,
+#     CAST("hRoommate" AS NUMBER(18,0)) AS HROOMMATE, -- Using NUMBER(18,0) as per DDL
+#     "iApplicStatus" AS IAPPLICSTATUS,
+#     "idwelling" AS IDWELLING,
+#     "sAutoColor4" AS SAUTOCOLOR4,
+#     "sPrev2Addr2" AS SPREV2ADDR2,
+#     "sEmergWorkPhone" AS SEMERGWORKPHONE,
+#     "sEmpAddr2" AS SEMPADDR2,
+#     "sShowAgent" AS SSHOWAGENT,
+#     "sEmpZip" AS SEMPZIP,
+#     "sTelFax" AS STELFAX,
+#     "dtPrefMoveIn" AS DTPREFMOVEIN,
+#     "hUnitType" AS HUNITTYPE,
+#     "sCheckNum" AS SCHECKNUM,
+#     "dtPrevEmpStart" AS DTPREVEMPSTART,
+#     "hCountry" AS HCOUNTRY,
+#     "sPrevEmpAddr2" AS SPREVEMPADDR2,
+#     "hTenantCopiedFrom" AS HTENANTCOPIEDFROM,
+#     "iTypeofPrevEmpAddlIncome" AS ITYPEOFPREVEMPADDLINCOME,
+#     "hResCRMCustomer" AS HRESCRMCUSTOMER,
+#     "bAirbnbHost" AS BAIRBNBHOST,
+#     "hDLCountry" AS HDLCOUNTRY,
+#     "hPrefLanguage" AS HPREFLANGUAGE,
+#     "bIgnoreResCRMCustomerAutoCreate" AS BIGNORERESCRMCUSTOMERAUTOCREATE,
+#     "dtUnitSelected" AS DTUNITSELECTED,
+#     "dtRentalOptions" AS DTRENTALOPTIONS,
+#     "dtAppFormCompleted" AS DTAPPFORMCOMPLETED,
+#     "bInactivated" AS BINACTIVATED,
+#     "bOverrideLeaseCharges" AS BOVERRIDELEASECHARGES,
+#     "bHousingVoucher" AS BHOUSINGVOUCHER,
+#     "bInvalidLead" AS BINVALIDLEAD,
+#     "iMaxPWFStepCompleted" AS IMAXPWFSTEPCOMPLETED,
+#     "bhasportablescreeningreport" AS BHASPORTABLESCREENINGREPORT,
+#     "iHomepplStatus" AS IHOMEPPLSTATUS,
+#     "iUSMilitaryServiceMember" AS IUSMILITARYSERVICEMEMBER,
+# 	'6495bfe7-793a-4275-85b2-671389b3c13b' AS BATCH_ID,
+#     cast(
+#         convert_timezone(
+#             'America/Los_Angeles', 'America/Chicago',current_timestamp()
+#         ) as datetime
+#     ) AS INSERT_TIMESTAMP
+# FROM PROD_RZ.yardi_replicate.PROSPECT a
+# INNER JOIN PROD_RZ.yardi_replicate.PROSPECT_DECRYPTED b ON a."hMy" = b.HMY
+#   )
+# /* {"app": "dbt", "dbt_version": "2025.11.24+ab6209c", "profile_name": "user", "target_name": "default", "node_id": "model.edw_migration.rcz_replicate_prospect"} */;
+# insert into PROD_RCZ.yardi_replicate.PROSPECT ("HMY", "HPARENT", "HTENANT", "SFIRSTNAME", "SMIDDLENAME", "SLASTNAME", "SSALUTATION", "SADDR1", "SADDR2", "SCITY", "SSTATE", "SZIP", "DHOWLONG", "STELHOME", "STELOFFICE", "STELCELL", "STELFAX", "SFEDID", "SEMAIL", "SEMAIL2", "DTDOB", "SDRIVERSLICENSE", "SDLSTATE", "DINCOME", "SRELATIONSHIP", "BOCCUPANT", "ILEASESTEP", "SSTATUS", "DPREFRENT", "DPREFBEDROOMS", "DPREFBATH", "DTPREFMOVEIN", "HPROPERTY", "HUNITTYPE", "HUNIT", "DTLEASEFROM", "DTLEASETO", "SSOURCE", "SSECONDARYSOURCE", "SAGENT", "SPREVADDR1", "SPREVADDR2", "SPREVCITY", "SPREVSTATE", "SPREVZIP", "DPREVHOWLONG", "SPREV2ADDR1", "SPREV2ADDR2", "SPREV2CITY", "SPREV2STATE", "SPREV2ZIP", "SEMPCOMPANY", "SEMPPOSITION", "DTEMPSTART", "SEMPADDR1", "SEMPADDR2", "SEMPCITY", "SEMPSTATE", "SEMPZIP", "SEMPPHONE", "SEMERGNAME", "SEMERGRELATION", "SEMERGTELHOME", "SEMERGPHONE", "SAUTOTYPE1", "SAUTOCOLOR1", "SAUTOLICENSE1", "SAUTOSTATE1", "SAUTOTYPE2", "SAUTOCOLOR2", "SAUTOLICENSE2", "SAUTOSTATE2", "DTFIRSTCONTACT", "DTSHOW", "DTAPPLY", "DTAPPROVE", "DTCANCEL", "DTDENY", "DPAYMENT", "DTPAYDATE", "SCHECKNUM", "SNOTES", "HSUMMARY", "BSUBSIDIZED", "SCARDTYPE", "SCARDNUM", "DTCARDEXPIRATION", "ILEASETERM", "SFIRSTCONTACTTYPE", "SCODE", "HAPPLICANT", "DQUOTEDRENT", "ITYPE", "HCUSTOMER", "STELALT", "BWEBLINKS", "B50059", "BTAXCR", "BHOME", "BRD", "BFAILVALIDATION", "IAFFLEASESTEP", "SSHOWAGENT", "HCOUNTRY", "SADDR3", "SADDR4", "IWEBLINKSSTEP", "HPROSPECTCOPIEDTO", "HPROSPECTCOPIEDFROM", "HROOMMATE", "HROOM", "HBED", "BSTUDENT", "SLEADXREF", "HINTERFACECONFIG", "IAPPLICSTATUS", "DTSTATUS", "DTAPPSUBMIT", "SMAIDENNAME", "DTCURADDRSTART", "DCURADDRMONTHLYRENT", "SCURADDRREASONFORMOVING", "DTPREVADDRSTART", "DPREVADDRMONTHLYRENT", "SPREVADDRREASONFORMOVING", "DEMPADDLINCOME", "SEMPADDLINCOMESOURCE", "SEMERGADDR1", "SEMERGADDR2", "SEMERGCITY", "SEMERGSTATE", "SEMERGZIP", "BONLINELEASE", "SAUTOMODEL1", "DAUTOYEAR1", "SAUTOMODEL2", "DAUTOYEAR2", "HFOREIGNDB", "SEXTREFERENCE", "SENVELOPEID", "SSIGNSTATUS", "SEMPLOYMENTSTATUS", "SDRIVERSLICENSESECURE", "SFEDIDSECURE", "TROWVERSION", "SPREVADDR3", "SPREVADDR4", "HPREVCOUNTRY", "SEMERGADDR3", "SEMERGADDR4", "HEMERGCOUNTRY", "HUSERCREATEDBY", "DTCREATED", "HUSERMODIFIEDBY", "DTLASTMODIFIED", "SSUFFIXNAME", "HMERGEDFROM", "HAGENT", "SMARITALSTATUS", "DCURADDRMONTHLYMORTPAYMENT", "SCURADDRAPARTMENTCOMMUNITY", "SCURADDRMGMTCOMPANY", "SCURADDRMGMTCOMPANYPHONE", "SCURADDR30DAYNOTICEGIVEN", "SEMPSUPERVISORNAME", "SPREVEMPCOMPANY", "SPREVEMPPOSITION", "SPREVEMPADDR1", "SPREVEMPADDR2", "SPREVEMPCITY", "SPREVEMPSTATE", "SPREVEMPZIP", "SPREVEMPPHONE", "SPREVEMPSUPERVISORNAME", "DTPREVEMPSTART", "DPREVINCOME", "DPREVEMPADDLINCOME", "SPREVEMPADDLINCOMESOURCE", "DTPREVEMPEND", "SSCREISEVICTED", "SSCREISEVICTEDDETAIL", "SSCREISCONVICTEDFELONY", "SSCRECRIMINALCHGPENDING", "DPREVADDRMONTHLYMORTPAYMENT", "SPREVADDRAPARTMENTCOMMUNITY", "SPREVADDRMGMTCOMPANY", "SPREVADDRMGMTCOMPANYPHONE", "SPREVADDR30DAYNOTICEGIVEN", "ILEASEREADY", "HPMDOCID", "SREFERRAL", "IOCCUPANTTYPE", "ILEADSTAGE", "ILEADSCORE", "SEMERGTELOFFICE", "SEMERGTELCELL", "SSCRECRIMINALCHGPENDINGDETAIL", "SSCREISCONVICTEDFELONYDETAIL", "HRENTCAFEID", "SRENTCAFECODE", "HRENTCAFEPARENTID", "SAUTOLICENSE3", "SAUTOLICENSE4", "SAUTOSTATE3", "SAUTOSTATE4", "SAUTOTYPE3", "SAUTOCOLOR3", "SAUTOTYPE4", "SAUTOCOLOR4", "SAUTOMODEL3", "DAUTOYEAR3", "SAUTOMODEL4", "DAUTOYEAR4", "DTDOBSECURE", "SPREFCAFEFLOORPLAN", "BILS", "BNOMIDDLENAME", "BLOCALPROGRAM", "IPREFERREDMOC", "BFORMERNAME", "SFORMERNAME", "BSMOKE", "BNODRIVLICENSE", "SGOVCARDTYPE", "DTGOVCARDEXPDATE", "BUSARMYFORCES", "SRANK", "SDUTYSTATION", "SSERVICE", "BCURRRENTOROWN", "BPREVRENTOROWN", "SLANDLORDLENDERNAME", "DTENDDATECURRADDRESS", "DTENDDATEPREVADDRESS", "DTENDDATECURREMPLOYER", "DTENDDATEPREVEMPLOYER", "ITYPEOFADDINCOME", "SEMERGWORKPHONE", "SEMERGEMAIL", "IDWELLING", "SCREDITPROBLEMS", "BBANKRUPTCY", "BSUEDFORRENT", "BSUEDFORDAMAGE", "BMOVED_LEASEVIOLATION", "BBROKENRENTALAGREEMENT", "IRENTCAFEREACH", "BOCCUPANTAPPFORAPPROVEDAPPLICATION", "IOCCUPANTAPPFORAPPROVEDAPPLICATIONSTATUS", "BEARNESTMONEYACKNOWLEDGED", "DTEARNESTMONEYACKNOWLEDGED", "BDONOTCHARGEEM", "IEMATTEMPTS", "BEARNESTMONEYPAID", "BISPREQUALIFIED", "IPREQUALIFYSTATUS", "DPREQUALIFIEDAMOUNT", "DTPREQUALIFIED", "IIDVERIFYATTEMPT", "IIDVERIFYSTATUS", "HHUBPROPERTY", "BREMOVEDFROMCRMQUEUE", "SNICKNAME", "BNOSSN", "DTCREATEDUTC", "HGUARANTOR", "HTENANTCOPIEDFROM", "ITYPEOFPREVEMPADDLINCOME", "HRESCRMCUSTOMER", "BAIRBNBHOST", "HDLCOUNTRY", "HPREFLANGUAGE", "BIGNORERESCRMCUSTOMERAUTOCREATE", "DTUNITSELECTED", "DTRENTALOPTIONS", "DTAPPFORMCOMPLETED", "BINACTIVATED", "BOVERRIDELEASECHARGES", "BHOUSINGVOUCHER", "BINVALIDLEAD", "IMAXPWFSTEPCOMPLETED", "BHASPORTABLESCREENINGREPORT", "IHOMEPPLSTATUS", "IUSMILITARYSERVICEMEMBER", "BATCH_ID", "INSERT_TIMESTAMP")
+# ;
+# """
 # if __name__ == "__main__":
-#     org_id = "76d33fb3-6062-456b-a211-4aec9971f8be"
-#     batch_id = "32f55d8f-4731-4810-aeb8-4cec0d5ae989"
-#     connection_id = "4aeb318b-6819-4873-9fae-33bab55ac922"
-#     lineage_builder(org_id, connection_id, batch_id)
+#     result = extract_sql_lineage_source_to_target(sql)
+#     print(result)

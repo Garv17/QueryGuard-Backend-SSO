@@ -486,6 +486,148 @@ def _derive_upstreams_via_alias_walk(
         if _is_string_literal(expr):
             continue
         
+        # Handle function expressions (like CAST, CONVERT) that may contain column references
+        if isinstance(expr, (sqlglot.exp.Cast, sqlglot.exp.Convert)):
+            # Extract column reference from the function argument
+            func_arg = expr.this
+            if isinstance(func_arg, sqlglot.exp.Column):
+                column_name = _extract_column_name_from_expression(func_arg.this, preserve_quoted=True)
+                if not column_name:
+                    column_name = func_arg.name
+                
+                table_alias = None
+                if func_arg.table:
+                    if isinstance(func_arg.table, sqlglot.exp.Identifier):
+                        table_alias = _extract_column_name_from_identifier(func_arg.table, preserve_quoted=True)
+                    elif isinstance(func_arg.table, str):
+                        table_alias = func_arg.table
+                    else:
+                        table_alias = getattr(func_arg.table, "name", None)
+                
+                # Check if column name itself contains table alias (e.g., "a.hRoommate")
+                if column_name and '.' in column_name and not table_alias:
+                    potential_table_alias, potential_column = _parse_quoted_identifier_with_dot(column_name)
+                    if potential_table_alias:
+                        table_alias = potential_table_alias
+                        column_name = potential_column
+                
+                if column_name:
+                    if table_alias:
+                        resolved = _resolve_alias_to_table(
+                            str(table_alias),
+                            column_name,
+                            alias_map,
+                            cte_map,
+                        )
+                        if resolved:
+                            resolved_table, resolved_column = resolved
+                            fallback_upstreams.add(
+                                _ColumnRef(
+                                    table=resolved_table,
+                                    column=resolved_column,
+                                )
+                            )
+                    else:
+                        # No table alias - try to find column in available sources
+                        if alias_map:
+                            for source_alias, table_ref in alias_map.items():
+                                resolved = _resolve_alias_to_table(
+                                    source_alias,
+                                    column_name,
+                                    alias_map,
+                                    cte_map,
+                                )
+                                if resolved:
+                                    resolved_table, resolved_column = resolved
+                                    fallback_upstreams.add(
+                                        _ColumnRef(
+                                            table=resolved_table,
+                                            column=resolved_column,
+                                        )
+                                    )
+                                    break
+                        if cte_map:
+                            for cte_alias, scope in cte_map.items():
+                                resolved = _resolve_alias_to_table(
+                                    cte_alias,
+                                    column_name,
+                                    alias_map,
+                                    cte_map,
+                                )
+                                if resolved:
+                                    resolved_table, resolved_column = resolved
+                                    fallback_upstreams.add(
+                                        _ColumnRef(
+                                            table=resolved_table,
+                                            column=resolved_column,
+                                        )
+                                    )
+                                    break
+            elif isinstance(func_arg, sqlglot.exp.Identifier):
+                # Handle double-quoted identifier directly in CAST (e.g., CAST("a.hRoommate" AS ...))
+                identifier_name = _extract_column_name_from_identifier(func_arg, preserve_quoted=True)
+                if identifier_name:
+                    table_alias = None
+                    column_name = identifier_name
+                    if '.' in identifier_name:
+                        potential_table_alias, potential_column = _parse_quoted_identifier_with_dot(identifier_name)
+                        if potential_table_alias:
+                            table_alias = potential_table_alias
+                            column_name = potential_column
+                    
+                    if table_alias:
+                        resolved = _resolve_alias_to_table(
+                            str(table_alias),
+                            column_name,
+                            alias_map,
+                            cte_map,
+                        )
+                        if resolved:
+                            resolved_table, resolved_column = resolved
+                            fallback_upstreams.add(
+                                _ColumnRef(
+                                    table=resolved_table,
+                                    column=resolved_column,
+                                )
+                            )
+                    else:
+                        # No table alias - try to find column in available sources
+                        if alias_map:
+                            for source_alias, table_ref in alias_map.items():
+                                resolved = _resolve_alias_to_table(
+                                    source_alias,
+                                    column_name,
+                                    alias_map,
+                                    cte_map,
+                                )
+                                if resolved:
+                                    resolved_table, resolved_column = resolved
+                                    fallback_upstreams.add(
+                                        _ColumnRef(
+                                            table=resolved_table,
+                                            column=resolved_column,
+                                        )
+                                    )
+                                    break
+                        if cte_map:
+                            for cte_alias, scope in cte_map.items():
+                                resolved = _resolve_alias_to_table(
+                                    cte_alias,
+                                    column_name,
+                                    alias_map,
+                                    cte_map,
+                                )
+                                if resolved:
+                                    resolved_table, resolved_column = resolved
+                                    fallback_upstreams.add(
+                                        _ColumnRef(
+                                            table=resolved_table,
+                                            column=resolved_column,
+                                        )
+                                    )
+                                    break
+            continue
+        
         # Handle Identifier expressions directly (e.g., double-quoted identifiers like "dtDOB")
         # Only process if it's a quoted identifier (double-quoted) that might be a column reference
         if isinstance(expr, sqlglot.exp.Identifier):
@@ -1119,6 +1261,146 @@ def _get_direct_raw_col_upstreams(
             if _is_string_literal(value_expr):
                 continue
             
+            # Handle CAST expressions inside Alias (e.g., CAST("hTenant" AS ...) AS htenant)
+            if isinstance(value_expr, (sqlglot.exp.Cast, sqlglot.exp.Convert)):
+                cast_arg = value_expr.this
+                if isinstance(cast_arg, sqlglot.exp.Identifier):
+                    # Handle double-quoted identifier in CAST (e.g., CAST("hTenant" AS ...))
+                    identifier_name = _extract_column_name_from_identifier(cast_arg, preserve_quoted=True)
+                    if identifier_name:
+                        column_name = identifier_name
+                        table_alias = None
+                        if '.' in identifier_name:
+                            potential_table_alias, potential_column = _parse_quoted_identifier_with_dot(identifier_name)
+                            if potential_table_alias:
+                                table_alias = potential_table_alias
+                                column_name = potential_column
+                        
+                        if column_name:
+                            if table_alias:
+                                resolved = _resolve_alias_to_table(
+                                    str(table_alias),
+                                    column_name,
+                                    alias_table_mapping,
+                                    cte_scope_mapping,
+                                )
+                                if resolved:
+                                    resolved_table, resolved_column = resolved
+                                    direct_raw_col_upstreams.add(
+                                        _ColumnRef(
+                                            table=resolved_table,
+                                            column=resolved_column,
+                                        )
+                                    )
+                            else:
+                                # No table alias - try to find column in available sources
+                                if alias_table_mapping:
+                                    for source_alias, table_ref in alias_table_mapping.items():
+                                        resolved = _resolve_alias_to_table(
+                                            source_alias,
+                                            column_name,
+                                            alias_table_mapping,
+                                            cte_scope_mapping,
+                                        )
+                                        if resolved:
+                                            resolved_table, resolved_column = resolved
+                                            direct_raw_col_upstreams.add(
+                                                _ColumnRef(
+                                                    table=resolved_table,
+                                                    column=resolved_column,
+                                                )
+                                            )
+                                            break
+                                if cte_scope_mapping:
+                                    for cte_alias, scope in cte_scope_mapping.items():
+                                        resolved = _resolve_alias_to_table(
+                                            cte_alias,
+                                            column_name,
+                                            alias_table_mapping,
+                                            cte_scope_mapping,
+                                        )
+                                        if resolved:
+                                            resolved_table, resolved_column = resolved
+                                            direct_raw_col_upstreams.add(
+                                                _ColumnRef(
+                                                    table=resolved_table,
+                                                    column=resolved_column,
+                                                )
+                                            )
+                                            break
+                elif isinstance(cast_arg, sqlglot.exp.Column):
+                    # Handle Column expression in CAST
+                    column_name = _extract_column_name_from_expression(cast_arg.this, preserve_quoted=True)
+                    if not column_name:
+                        column_name = cast_arg.name
+                    
+                    table_alias = None
+                    if cast_arg.table:
+                        if isinstance(cast_arg.table, sqlglot.exp.Identifier):
+                            table_alias = _extract_column_name_from_identifier(cast_arg.table, preserve_quoted=True)
+                        elif isinstance(cast_arg.table, str):
+                            table_alias = cast_arg.table
+                        else:
+                            table_alias = getattr(cast_arg.table, "name", None)
+                    
+                    if column_name and '.' in column_name and not table_alias:
+                        potential_table_alias, potential_column = _parse_quoted_identifier_with_dot(column_name)
+                        if potential_table_alias:
+                            table_alias = potential_table_alias
+                            column_name = potential_column
+                    
+                    if column_name:
+                        if table_alias:
+                            resolved = _resolve_alias_to_table(
+                                str(table_alias),
+                                column_name,
+                                alias_table_mapping,
+                                cte_scope_mapping,
+                            )
+                            if resolved:
+                                resolved_table, resolved_column = resolved
+                                direct_raw_col_upstreams.add(
+                                    _ColumnRef(
+                                        table=resolved_table,
+                                        column=resolved_column,
+                                    )
+                                )
+                        else:
+                            if alias_table_mapping:
+                                for source_alias, table_ref in alias_table_mapping.items():
+                                    resolved = _resolve_alias_to_table(
+                                        source_alias,
+                                        column_name,
+                                        alias_table_mapping,
+                                        cte_scope_mapping,
+                                    )
+                                    if resolved:
+                                        resolved_table, resolved_column = resolved
+                                        direct_raw_col_upstreams.add(
+                                            _ColumnRef(
+                                                table=resolved_table,
+                                                column=resolved_column,
+                                            )
+                                        )
+                                        break
+                            if cte_scope_mapping:
+                                for cte_alias, scope in cte_scope_mapping.items():
+                                    resolved = _resolve_alias_to_table(
+                                        cte_alias,
+                                        column_name,
+                                        alias_table_mapping,
+                                        cte_scope_mapping,
+                                    )
+                                    if resolved:
+                                        resolved_table, resolved_column = resolved
+                                        direct_raw_col_upstreams.add(
+                                            _ColumnRef(
+                                                table=resolved_table,
+                                                column=resolved_column,
+                                            )
+                                        )
+                                        break
+            
             if _is_sequence_like_expression(value_expr):
                 for col_expr in value_expr.walk():
                     if not isinstance(col_expr, sqlglot.exp.Column):
@@ -1290,12 +1572,373 @@ def _get_direct_raw_col_upstreams(
                     f"Failed to parse placeholder column expression: {node.name} with dialect {dialect}. The exception was: {e}",
                     exc_info=True,
                 )
+        # Handle function expressions (like CAST, CONVERT, etc.) that may contain column references
+        elif isinstance(expression, (sqlglot.exp.Cast, sqlglot.exp.Convert, sqlglot.exp.Anonymous)):
+            # Walk through the function's arguments to find column references
+            # For CAST, the first argument (this) is the expression being cast
+            # For other functions, check all arguments
+            if isinstance(expression, sqlglot.exp.Cast):
+                # CAST(expression AS type) - check the expression being cast
+                cast_expr = expression.this
+                if cast_expr:
+                    # Skip if it's a nested function call without column references (e.g., convert_timezone)
+                    # Only process if it's a column reference or identifier
+                    if isinstance(cast_expr, (sqlglot.exp.Anonymous, sqlglot.exp.Function)):
+                        # For nested functions, walk through their arguments to find column references
+                        # This handles cases like CAST(convert_timezone(...) AS datetime) where
+                        # convert_timezone might have column references in its arguments
+                        for arg in cast_expr.expressions if hasattr(cast_expr, 'expressions') else []:
+                            if isinstance(arg, sqlglot.exp.Column):
+                                column_name = _extract_column_name_from_expression(arg.this, preserve_quoted=True)
+                                if not column_name:
+                                    column_name = arg.name
+                                
+                                table_alias = None
+                                if arg.table:
+                                    if isinstance(arg.table, sqlglot.exp.Identifier):
+                                        table_alias = _extract_column_name_from_identifier(arg.table, preserve_quoted=True)
+                                    elif isinstance(arg.table, str):
+                                        table_alias = arg.table
+                                    else:
+                                        table_alias = getattr(arg.table, "name", None)
+                                
+                                if column_name and table_alias:
+                                    resolved = _resolve_alias_to_table(
+                                        str(table_alias),
+                                        column_name,
+                                        alias_table_mapping,
+                                        cte_scope_mapping,
+                                    )
+                                    if resolved:
+                                        resolved_table, resolved_column = resolved
+                                        direct_raw_col_upstreams.add(
+                                            _ColumnRef(
+                                                table=resolved_table,
+                                                column=resolved_column,
+                                            )
+                                        )
+                        # Skip nested functions that don't contain column references
+                        continue
+                    
+                    # Check if it's a column reference (including double-quoted identifiers)
+                    if isinstance(cast_expr, sqlglot.exp.Column):
+                        column_name = _extract_column_name_from_expression(cast_expr.this, preserve_quoted=True)
+                        if not column_name:
+                            column_name = cast_expr.name
+                        
+                        table_alias = None
+                        if cast_expr.table:
+                            if isinstance(cast_expr.table, sqlglot.exp.Identifier):
+                                table_alias = _extract_column_name_from_identifier(cast_expr.table, preserve_quoted=True)
+                            elif isinstance(cast_expr.table, str):
+                                table_alias = cast_expr.table
+                            else:
+                                table_alias = getattr(cast_expr.table, "name", None)
+                        
+                        # Check if column name itself contains table alias (e.g., "a.hRoommate")
+                        if column_name and '.' in column_name and not table_alias:
+                            potential_table_alias, potential_column = _parse_quoted_identifier_with_dot(column_name)
+                            if potential_table_alias:
+                                table_alias = potential_table_alias
+                                column_name = potential_column
+                        
+                        if column_name:
+                            if table_alias:
+                                resolved = _resolve_alias_to_table(
+                                    str(table_alias),
+                                    column_name,
+                                    alias_table_mapping,
+                                    cte_scope_mapping,
+                                )
+                                if resolved:
+                                    resolved_table, resolved_column = resolved
+                                    direct_raw_col_upstreams.add(
+                                        _ColumnRef(
+                                            table=resolved_table,
+                                            column=resolved_column,
+                                        )
+                                    )
+                            else:
+                                # No table alias - try to find column in available sources
+                                if alias_table_mapping:
+                                    for source_alias, table_ref in alias_table_mapping.items():
+                                        resolved = _resolve_alias_to_table(
+                                            source_alias,
+                                            column_name,
+                                            alias_table_mapping,
+                                            cte_scope_mapping,
+                                        )
+                                        if resolved:
+                                            resolved_table, resolved_column = resolved
+                                            direct_raw_col_upstreams.add(
+                                                _ColumnRef(
+                                                    table=resolved_table,
+                                                    column=resolved_column,
+                                                )
+                                            )
+                                            break
+                                if cte_scope_mapping:
+                                    for cte_alias, scope in cte_scope_mapping.items():
+                                        resolved = _resolve_alias_to_table(
+                                            cte_alias,
+                                            column_name,
+                                            alias_table_mapping,
+                                            cte_scope_mapping,
+                                        )
+                                        if resolved:
+                                            resolved_table, resolved_column = resolved
+                                            direct_raw_col_upstreams.add(
+                                                _ColumnRef(
+                                                    table=resolved_table,
+                                                    column=resolved_column,
+                                                )
+                                            )
+                                            break
+                    elif isinstance(cast_expr, sqlglot.exp.Identifier):
+                        # Handle double-quoted identifier directly in CAST (e.g., CAST("a.hRoommate" AS ...))
+                        identifier_name = _extract_column_name_from_identifier(cast_expr, preserve_quoted=True)
+                        if identifier_name:
+                            # Check if it contains table alias (e.g., "a.hRoommate")
+                            table_alias = None
+                            column_name = identifier_name
+                            if '.' in identifier_name:
+                                potential_table_alias, potential_column = _parse_quoted_identifier_with_dot(identifier_name)
+                                if potential_table_alias:
+                                    table_alias = potential_table_alias
+                                    column_name = potential_column
+                            
+                            if table_alias:
+                                resolved = _resolve_alias_to_table(
+                                    str(table_alias),
+                                    column_name,
+                                    alias_table_mapping,
+                                    cte_scope_mapping,
+                                )
+                                if resolved:
+                                    resolved_table, resolved_column = resolved
+                                    direct_raw_col_upstreams.add(
+                                        _ColumnRef(
+                                            table=resolved_table,
+                                            column=resolved_column,
+                                        )
+                                    )
+                            else:
+                                # No table alias - try to find column in available sources
+                                if alias_table_mapping:
+                                    for source_alias, table_ref in alias_table_mapping.items():
+                                        resolved = _resolve_alias_to_table(
+                                            source_alias,
+                                            column_name,
+                                            alias_table_mapping,
+                                            cte_scope_mapping,
+                                        )
+                                        if resolved:
+                                            resolved_table, resolved_column = resolved
+                                            direct_raw_col_upstreams.add(
+                                                _ColumnRef(
+                                                    table=resolved_table,
+                                                    column=resolved_column,
+                                                )
+                                            )
+                                            break
+                                if cte_scope_mapping:
+                                    for cte_alias, scope in cte_scope_mapping.items():
+                                        resolved = _resolve_alias_to_table(
+                                            cte_alias,
+                                            column_name,
+                                            alias_table_mapping,
+                                            cte_scope_mapping,
+                                        )
+                                        if resolved:
+                                            resolved_table, resolved_column = resolved
+                                            direct_raw_col_upstreams.add(
+                                                _ColumnRef(
+                                                    table=resolved_table,
+                                                    column=resolved_column,
+                                                )
+                                            )
+                                            break
+            else:
+                # For other functions, walk through all arguments to find column references
+                for arg in expression.expressions if hasattr(expression, 'expressions') else []:
+                    if isinstance(arg, sqlglot.exp.Column):
+                        column_name = _extract_column_name_from_expression(arg.this, preserve_quoted=True)
+                        if not column_name:
+                            column_name = arg.name
+                        
+                        table_alias = None
+                        if arg.table:
+                            if isinstance(arg.table, sqlglot.exp.Identifier):
+                                table_alias = _extract_column_name_from_identifier(arg.table, preserve_quoted=True)
+                            elif isinstance(arg.table, str):
+                                table_alias = arg.table
+                            else:
+                                table_alias = getattr(arg.table, "name", None)
+                        
+                        if column_name and table_alias:
+                            resolved = _resolve_alias_to_table(
+                                str(table_alias),
+                                column_name,
+                                alias_table_mapping,
+                                cte_scope_mapping,
+                            )
+                            if resolved:
+                                resolved_table, resolved_column = resolved
+                                direct_raw_col_upstreams.add(
+                                    _ColumnRef(
+                                        table=resolved_table,
+                                        column=resolved_column,
+                                    )
+                                )
+            continue
+        
         elif isinstance(node.expression, sqlglot.exp.Alias):
             column_expr = node.expression.this
             
             # Skip if the underlying expression is a string literal
             if _is_string_literal(column_expr):
                 continue
+            
+            # Check if the underlying expression is a function (like CAST) that contains a column reference
+            if isinstance(column_expr, (sqlglot.exp.Cast, sqlglot.exp.Convert)):
+                # Extract column reference from the function argument
+                func_arg = column_expr.this
+                if isinstance(func_arg, sqlglot.exp.Column):
+                    column_name = _extract_column_name_from_expression(func_arg.this, preserve_quoted=True)
+                    if not column_name:
+                        column_name = func_arg.name
+                    
+                    table_alias = None
+                    if func_arg.table:
+                        if isinstance(func_arg.table, sqlglot.exp.Identifier):
+                            table_alias = _extract_column_name_from_identifier(func_arg.table, preserve_quoted=True)
+                        elif isinstance(func_arg.table, str):
+                            table_alias = func_arg.table
+                        else:
+                            table_alias = getattr(func_arg.table, "name", None)
+                    
+                    # Check if column name itself contains table alias (e.g., "a.hRoommate")
+                    if column_name and '.' in column_name and not table_alias:
+                        potential_table_alias, potential_column = _parse_quoted_identifier_with_dot(column_name)
+                        if potential_table_alias:
+                            table_alias = potential_table_alias
+                            column_name = potential_column
+                    
+                    if column_name:
+                        if table_alias:
+                            resolved = _resolve_alias_to_table(
+                                str(table_alias),
+                                column_name,
+                                alias_table_mapping,
+                                cte_scope_mapping,
+                            )
+                            if resolved:
+                                resolved_table, resolved_column = resolved
+                                direct_raw_col_upstreams.add(
+                                    _ColumnRef(
+                                        table=resolved_table,
+                                        column=resolved_column,
+                                    )
+                                )
+                        else:
+                            # No table alias - try to find column in available sources
+                            if alias_table_mapping:
+                                for source_alias, table_ref in alias_table_mapping.items():
+                                    resolved = _resolve_alias_to_table(
+                                        source_alias,
+                                        column_name,
+                                        alias_table_mapping,
+                                        cte_scope_mapping,
+                                    )
+                                    if resolved:
+                                        resolved_table, resolved_column = resolved
+                                        direct_raw_col_upstreams.add(
+                                            _ColumnRef(
+                                                table=resolved_table,
+                                                column=resolved_column,
+                                            )
+                                        )
+                                        break
+                            if cte_scope_mapping:
+                                for cte_alias, scope in cte_scope_mapping.items():
+                                    resolved = _resolve_alias_to_table(
+                                        cte_alias,
+                                        column_name,
+                                        alias_table_mapping,
+                                        cte_scope_mapping,
+                                    )
+                                    if resolved:
+                                        resolved_table, resolved_column = resolved
+                                        direct_raw_col_upstreams.add(
+                                            _ColumnRef(
+                                                table=resolved_table,
+                                                column=resolved_column,
+                                            )
+                                        )
+                                        break
+                elif isinstance(func_arg, sqlglot.exp.Identifier):
+                    # Handle double-quoted identifier directly (e.g., CAST("a.hRoommate" AS ...))
+                    identifier_name = _extract_column_name_from_identifier(func_arg, preserve_quoted=True)
+                    if identifier_name:
+                        table_alias = None
+                        column_name = identifier_name
+                        if '.' in identifier_name:
+                            potential_table_alias, potential_column = _parse_quoted_identifier_with_dot(identifier_name)
+                            if potential_table_alias:
+                                table_alias = potential_table_alias
+                                column_name = potential_column
+                        
+                        if table_alias:
+                            resolved = _resolve_alias_to_table(
+                                str(table_alias),
+                                column_name,
+                                alias_table_mapping,
+                                cte_scope_mapping,
+                            )
+                            if resolved:
+                                resolved_table, resolved_column = resolved
+                                direct_raw_col_upstreams.add(
+                                    _ColumnRef(
+                                        table=resolved_table,
+                                        column=resolved_column,
+                                    )
+                                )
+                        else:
+                            # No table alias - try to find column in available sources
+                            if alias_table_mapping:
+                                for source_alias, table_ref in alias_table_mapping.items():
+                                    resolved = _resolve_alias_to_table(
+                                        source_alias,
+                                        column_name,
+                                        alias_table_mapping,
+                                        cte_scope_mapping,
+                                    )
+                                    if resolved:
+                                        resolved_table, resolved_column = resolved
+                                        direct_raw_col_upstreams.add(
+                                            _ColumnRef(
+                                                table=resolved_table,
+                                                column=resolved_column,
+                                            )
+                                        )
+                                        break
+                            if cte_scope_mapping:
+                                for cte_alias, scope in cte_scope_mapping.items():
+                                    resolved = _resolve_alias_to_table(
+                                        cte_alias,
+                                        column_name,
+                                        alias_table_mapping,
+                                        cte_scope_mapping,
+                                    )
+                                    if resolved:
+                                        resolved_table, resolved_column = resolved
+                                        direct_raw_col_upstreams.add(
+                                            _ColumnRef(
+                                                table=resolved_table,
+                                                column=resolved_column,
+                                            )
+                                        )
+                                        break
             
             if isinstance(column_expr, sqlglot.exp.Column):
                 # Extract column name, preserving double-quoted identifiers
