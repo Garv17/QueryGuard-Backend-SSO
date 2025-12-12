@@ -214,7 +214,19 @@ from typing import List, Optional
 from pydantic import BaseModel, validator
 import snowflake.connector
 from app.database import get_db
-from app.utils.models import SnowflakeConnection, SnowflakeDatabase, SnowflakeSchema, User, SnowflakeJob
+from app.utils.models import (
+    ColumnLevelLineage,
+    FilterClauseColumnLineage,
+    InformationSchemacolumns,
+    LineageLoadWatermark,
+    SnowflakeConnection,
+    SnowflakeCrawlAudit,
+    SnowflakeDatabase,
+    SnowflakeJob,
+    SnowflakeQueryRecord,
+    SnowflakeSchema,
+    User,
+)
 from app.utils.auth_deps import get_current_user
 from app.utils.rbac import require_connector_access, check_organization_access
 import uuid
@@ -443,6 +455,164 @@ def list_connections(current_user: User = Depends(get_current_user), db: Session
     ).all()
     logger.debug("/snowflake/connections - list count=%d", len(connections))
     return connections
+
+
+@router.delete("/connections/{connection_id}")
+def deactivate_connection(
+    connection_id: str,
+    current_user: User = Depends(require_connector_access()),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """Deactivate a Snowflake connection (soft delete)"""
+    try:
+        conn_uuid = uuid.UUID(connection_id)
+    except ValueError:
+        logger.warning("/snowflake/connections - delete: invalid id %s", connection_id)
+        raise HTTPException(status_code=400, detail="Invalid connection ID format")
+
+    connection = db.query(SnowflakeConnection).filter(
+        SnowflakeConnection.id == conn_uuid,
+        SnowflakeConnection.org_id == current_user.org_id,
+        SnowflakeConnection.is_active == True
+    ).first()
+    
+    if not connection:
+        logger.warning("/snowflake/connections - delete: connection not found %s", conn_uuid)
+        raise HTTPException(status_code=404, detail="Snowflake connection not found")
+
+    connection.is_active = False
+    
+    # Also deactivate the associated job if it exists
+    job = db.query(SnowflakeJob).filter(SnowflakeJob.connection_id == conn_uuid).first()
+    if job:
+        job.is_active = False
+        logger.debug("/snowflake/connections - delete: deactivated job for connection %s", conn_uuid)
+    
+    try:
+        db.commit()
+        logger.info("/snowflake/connections - delete: deactivated id=%s", connection.id)
+        return {"message": "Snowflake connection deactivated successfully"}
+    except IntegrityError:
+        db.rollback()
+        logger.exception("/snowflake/connections - delete: failed to deactivate")
+        raise HTTPException(status_code=400, detail="Failed to deactivate connection")
+
+
+@router.delete(
+    "/dev/connections/{connection_id}/purge",
+    tags=["Snowflake (Dev)"],
+    summary="DEV ONLY: Hard delete Snowflake connection and all related data",
+)
+def dev_purge_connection_data(
+    connection_id: str,
+    current_user: User = Depends(require_connector_access()),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    """
+    Dev-only: permanently delete a Snowflake connection and all associated data.
+    """
+    try:
+        conn_uuid = uuid.UUID(connection_id)
+    except ValueError:
+        logger.warning("/snowflake/dev/purge - invalid id %s", connection_id)
+        raise HTTPException(status_code=400, detail="Invalid connection ID format")
+
+    connection = db.query(SnowflakeConnection).filter(SnowflakeConnection.id == conn_uuid).first()
+    if not connection:
+        logger.warning("/snowflake/dev/purge - connection not found %s", conn_uuid)
+        raise HTTPException(status_code=404, detail="Snowflake connection not found")
+
+    # Ensure caller can access the org that owns this connection (PRODUCT_SUPPORT_ADMIN can cross-org)
+    check_organization_access(current_user, connection.org_id)
+
+    try:
+        deleted_counts = {}
+
+        # Delete lineage artifacts
+        deleted_counts["column_level_lineage"] = (
+            db.query(ColumnLevelLineage)
+            .filter(ColumnLevelLineage.connection_id == conn_uuid)
+            .delete(synchronize_session=False)
+        )
+        deleted_counts["filter_clause_lineage"] = (
+            db.query(FilterClauseColumnLineage)
+            .filter(FilterClauseColumnLineage.connection_id == conn_uuid)
+            .delete(synchronize_session=False)
+        )
+        deleted_counts["lineage_watermarks"] = (
+            db.query(LineageLoadWatermark)
+            .filter(LineageLoadWatermark.connection_id == conn_uuid)
+            .delete(synchronize_session=False)
+        )
+
+        # Delete crawl history and query metadata
+        deleted_counts["crawl_audit"] = (
+            db.query(SnowflakeCrawlAudit)
+            .filter(SnowflakeCrawlAudit.connection_id == conn_uuid)
+            .delete(synchronize_session=False)
+        )
+        deleted_counts["query_history"] = (
+            db.query(SnowflakeQueryRecord)
+            .filter(SnowflakeQueryRecord.connection_id == conn_uuid)
+            .delete(synchronize_session=False)
+        )
+        deleted_counts["information_schema_columns"] = (
+            db.query(InformationSchemacolumns)
+            .filter(InformationSchemacolumns.connection_id == conn_uuid)
+            .delete(synchronize_session=False)
+        )
+
+        # Delete schemas and databases tied to this connection
+        db_ids_subquery = (
+            db.query(SnowflakeDatabase.id)
+            .filter(SnowflakeDatabase.connection_id == conn_uuid)
+            .subquery()
+        )
+        deleted_counts["schemas"] = (
+            db.query(SnowflakeSchema)
+            .filter(SnowflakeSchema.database_id.in_(db_ids_subquery))
+            .delete(synchronize_session=False)
+        )
+        deleted_counts["databases"] = (
+            db.query(SnowflakeDatabase)
+            .filter(SnowflakeDatabase.connection_id == conn_uuid)
+            .delete(synchronize_session=False)
+        )
+
+        # Delete scheduled job (if any)
+        deleted_counts["jobs"] = (
+            db.query(SnowflakeJob)
+            .filter(SnowflakeJob.connection_id == conn_uuid)
+            .delete(synchronize_session=False)
+        )
+
+        # Finally delete the connection itself (hard delete)
+        deleted_counts["connections"] = (
+            db.query(SnowflakeConnection)
+            .filter(SnowflakeConnection.id == conn_uuid)
+            .delete(synchronize_session=False)
+        )
+
+        db.commit()
+        logger.warning(
+            "/snowflake/dev/purge - hard-deleted connection %s with counts %s",
+            conn_uuid,
+            deleted_counts,
+        )
+        return {
+            "message": "Snowflake connection and all related data permanently deleted (dev-only).",
+            "connection_id": str(conn_uuid),
+            "deleted_counts": deleted_counts,
+        }
+    except Exception as exc:
+        db.rollback()
+        logger.exception("/snowflake/dev/purge - failed to delete data for %s", conn_uuid)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to purge Snowflake connection data: {str(exc)}",
+        )
 
 
 @router.get("/fetch-databases/{connection_id}")

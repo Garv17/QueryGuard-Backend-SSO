@@ -2,6 +2,7 @@
 # POST /auth/login → login & get JWT
 # POST /auth/forgot-password → generate reset token
 # POST /auth/reset-password → reset password with token
+# POST /auth/change-password → change password (requires authentication)
 # POST /auth/logout → revoke JWT
 # GET /auth/me → get current user info
 
@@ -13,8 +14,12 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.database import get_db
-from app.utils.models import User, UserToken, Organization
-from app.utils.rbac import MEMBER
+from app.utils.models import (
+    User, UserToken, Organization,
+    SnowflakeConnection, GitHubInstallation, JiraConnection, DbtCloudConnection
+)
+from app.utils.rbac import MEMBER, has_any_role, PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, ORGANIZATION_ADMIN
+from typing import List, Dict
 from app.utils.auth_deps import get_current_user, SECRET_KEY, ALGORITHM
 from app.utils.email_service import send_password_reset_email
 import hashlib
@@ -47,6 +52,10 @@ class ResetPassword(BaseModel):
     token: str
     new_password: str
 
+class ChangePassword(BaseModel):
+    current_password: str
+    new_password: str
+
 class UserResponse(BaseModel):
     id: UUID
     username: str
@@ -56,6 +65,13 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str
+    is_connection_setup: bool
+    missing_connectors: List[str]
 
 
 # --- Helpers ---
@@ -71,6 +87,70 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def check_connector_setup_status(org_id: UUID, db: Session) -> Dict[str, bool]:
+    """
+    Check which connectors are set up for an organization.
+    Returns a dictionary with connector names as keys and boolean values indicating if they're set up.
+    """
+    connectors_status = {
+        "snowflake": False,
+        "github": False,
+        "jira": False,
+        "dbt_cloud": False
+    }
+    
+    # Check Snowflake connections
+    snowflake_conn = db.query(SnowflakeConnection).filter(
+        SnowflakeConnection.org_id == org_id,
+        SnowflakeConnection.is_active == True
+    ).first()
+    if snowflake_conn:
+        connectors_status["snowflake"] = True
+    
+    # Check GitHub installations
+    github_installation = db.query(GitHubInstallation).filter(
+        GitHubInstallation.org_id == org_id,
+        GitHubInstallation.is_active == True
+    ).first()
+    if github_installation:
+        connectors_status["github"] = True
+    
+    # Check Jira connections
+    jira_conn = db.query(JiraConnection).filter(
+        JiraConnection.org_id == org_id,
+        JiraConnection.is_active == True
+    ).first()
+    if jira_conn:
+        connectors_status["jira"] = True
+    
+    # Check dbt Cloud connections
+    dbt_conn = db.query(DbtCloudConnection).filter(
+        DbtCloudConnection.org_id == org_id,
+        DbtCloudConnection.is_active == True
+    ).first()
+    if dbt_conn:
+        connectors_status["dbt_cloud"] = True
+    
+    return connectors_status
+
+
+def get_missing_connectors(connectors_status: Dict[str, bool]) -> List[str]:
+    """Get list of connector names that are not set up."""
+    missing = []
+    connector_display_names = {
+        "snowflake": "Snowflake",
+        "github": "GitHub",
+        "jira": "Jira",
+        "dbt_cloud": "dbt Cloud"
+    }
+    
+    for connector, is_setup in connectors_status.items():
+        if not is_setup:
+            missing.append(connector_display_names.get(connector, connector))
+    
+    return missing
 
 
 # --- Endpoints ---
@@ -131,7 +211,7 @@ def signup(user: UserSignup, org_id: str, db: Session = Depends(get_db), request
         raise HTTPException(status_code=400, detail="Registration failed")
 
 
-@router.post("/login")
+@router.post("/login", response_model=LoginResponse)
 def login(user: UserLogin, db: Session = Depends(get_db), request: Request = None):
     logger.info("POST /auth/login - attempt username=%s ip=%s", user.username, request.client.host if request and request.client else "unknown")
     db_user = db.query(User).filter(
@@ -157,9 +237,48 @@ def login(user: UserLogin, db: Session = Depends(get_db), request: Request = Non
     )
     
     db.add(token_record)
+    
+    # Check connection setup status for admin users
+    is_connection_setup = True
+    missing_connectors = []
+    
+    # Only check for users with admin-level access (can manage connectors)
+    if has_any_role(db_user, [PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, ORGANIZATION_ADMIN]):
+        # Get organization
+        organization = db.query(Organization).filter(Organization.id == db_user.org_id).first()
+        
+        if organization:
+            # If flag is already True, skip checking (optimization)
+            if not organization.is_connection_setup:
+                # Check connector setup status
+                connectors_status = check_connector_setup_status(db_user.org_id, db)
+                
+                # Check if all connectors are set up
+                all_setup = all(connectors_status.values())
+                
+                if all_setup:
+                    # Update the flag to True
+                    organization.is_connection_setup = True
+                    is_connection_setup = True
+                    logger.info("/auth/login - all connectors set up for org_id=%s, flag updated", db_user.org_id)
+                else:
+                    is_connection_setup = False
+                    missing_connectors = get_missing_connectors(connectors_status)
+                    logger.info("/auth/login - missing connectors for org_id=%s: %s", db_user.org_id, missing_connectors)
+            else:
+                # Flag is already True, so connection setup is complete
+                is_connection_setup = True
+                logger.debug("/auth/login - connection setup already complete for org_id=%s", db_user.org_id)
+    
     db.commit()
     logger.info("/auth/login - token issued for user_id=%s", db_user.id)
-    return {"access_token": token, "token_type": "bearer"}
+    
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "is_connection_setup": is_connection_setup,
+        "missing_connectors": missing_connectors
+    }
 
 
 @router.post("/forgot-password")
@@ -229,6 +348,40 @@ def logout(current_user: User = Depends(get_current_user), db: Session = Depends
     
     logger.info("/auth/logout - tokens revoked for user_id=%s", current_user.id)
     return {"message": "Logged out successfully"}
+
+
+@router.post("/change-password")
+def change_password(
+    req: ChangePassword,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """
+    Change password for authenticated user.
+    Requires current password verification and sets new password.
+    """
+    logger.info("POST /auth/change-password - user_id=%s ip=%s", current_user.id, request.client.host if request and request.client else "unknown")
+    
+    # Verify current password
+    if current_user.password_hash != hash_password(req.current_password):
+        logger.warning("/auth/change-password - invalid current password for user_id=%s", current_user.id)
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    
+    # Check if new password is different from current password
+    if hash_password(req.new_password) == current_user.password_hash:
+        logger.warning("/auth/change-password - new password same as current password for user_id=%s", current_user.id)
+        raise HTTPException(status_code=400, detail="New password must be different from current password")
+    
+    # Update password
+    current_user.password_hash = hash_password(req.new_password)
+    
+    # Revoke all existing tokens for this user (force re-login for security)
+    db.query(UserToken).filter(UserToken.user_id == current_user.id).update({"is_revoked": True})
+    
+    db.commit()
+    logger.info("/auth/change-password - password changed successfully for user_id=%s", current_user.id)
+    return {"message": "Password changed successfully"}
 
 
 @router.get("/me", response_model=UserResponse)

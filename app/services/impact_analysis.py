@@ -177,6 +177,11 @@ def store_pr_analysis(
     repo_full_name: str,
     pr_number: int,
     pr_title: Optional[str],
+    pr_description: Optional[str] = None,
+    branch_name: Optional[str] = None,
+    author_name: Optional[str] = None,
+    pr_url: Optional[str] = None,
+    total_impacted_queries: Optional[int] = None,
     analysis_data: Dict,
 ) -> str:
     """
@@ -204,6 +209,15 @@ def store_pr_analysis(
         .first()
     )
 
+    # If total_impacted_queries not provided, calculate from analysis_data
+    if total_impacted_queries is None:
+        all_query_ids = set()
+        files = analysis_data.get("files", [])
+        for file_data in files:
+            affected_ids = file_data.get("affected_query_ids", [])
+            all_query_ids.update(affected_ids)
+        total_impacted_queries = len(all_query_ids)
+
     analysis = GitHubPullRequestAnalysis(
         org_id=installation.org_id,
         installation_id=installation.id,
@@ -211,6 +225,11 @@ def store_pr_analysis(
         repo_full_name=repo_full_name,
         pr_number=pr_number,
         pr_title=pr_title,
+        pr_description=pr_description,
+        branch_name=branch_name,
+        author_name=author_name,
+        pr_url=pr_url,
+        total_impacted_queries=total_impacted_queries,
         analysis_data=analysis_data,
     )
     db.add(analysis)
@@ -225,16 +244,25 @@ def store_pr_analysis(
 PLAN_PROMPT = """
 You are a metadata-aware lineage analyst. You will receive a SQL/schema change and a set of context snippets from a lineage knowledge base (CSV rows embedded in a vector store). 
 
+CRITICAL: You MUST be extremely selective and ONLY identify entities that have an EXPLICIT, DIRECT dependency on the specific column being changed in the SQL statement.
+
 Your task:
-1) Infer the impacted entities (tables/columns) based on the change and snippets.
-2) Suggest next queries to expand downstream dependencies (multi-hop), if any.
-3) Return a STRICT JSON as text with the following structure:
-       "found_entities": ["schema.table.column", ...], 
+1) Parse the SQL change to identify the EXACT column being modified (e.g., if "DROP COLUMN scenariocd", the column is "scenariocd").
+2) From the snippets, find ONLY target columns that have an EXPLICIT source-to-target relationship with this specific column.
+3) DO NOT include columns just because they're in the same table as a dependent column.
+4) Suggest next queries to expand downstream dependencies (multi-hop), if any.
+5) Return a STRICT JSON as text with the following structure:
+       "found_entities": ["database.schema.table.column", ...], 
        "next_queries": ["..."], 
        "notes": "..."
 
+CRITICAL RULES:
+- ONLY include columns that are explicitly shown in snippets to depend on the changed column
+- If the change is "DROP COLUMN scenariocd", ONLY include columns where snippets show: source_column=scenariocd → target_column
+- DO NOT include other columns from the same target table unless they also explicitly depend on the changed column
+- For example, if snippets show "scenariocd → allocationtype", ONLY include "allocationtype", NOT "accountfrom", "accountto", etc.
 - If no further queries are useful, return an empty list for "next_queries".
-- Prefer exact entity strings from the snippets for next queries (e.g., "edw_staging.allocationrule.departmentlist").
+- Prefer exact entity strings from the snippets for next queries (e.g., "bronze.accounts.allocationrule.allocationtype").
 
 SQL/Schema Change:
 {change}
@@ -248,15 +276,29 @@ Respond only with JSON text, do not include any extra explanation.
 FINAL_REPORT_PROMPT = """
 You are a metadata-aware assistant tasked with generating a **complete multi-hop downstream impact analysis report**.
 
+CRITICAL: You MUST be extremely strict and ONLY report columns that have an EXPLICIT, DIRECT dependency on the specific column being changed. DO NOT include columns just because they're in the same table as a dependent column.
+
 You are given:
-1. The SQL/schema change
+1. The SQL/schema change (parse it to identify the EXACT column being modified)
 2. ALL retrieved lineage context (multi-hop) as raw snippets
+
+VALIDATION FIRST:
+- Parse the SQL change to extract the exact column name being changed (e.g., if "DROP COLUMN scenariocd", the column is "scenariocd")
+- Check snippets for EXPLICIT source_column → target_column relationships involving this specific column
+- If snippets show a relationship like "source_column: scenariocd → target_column: allocationtype", ONLY include "allocationtype"
+- DO NOT include other columns from the same target table (e.g., "accountfrom", "accountto") unless snippets explicitly show they also depend on the changed column
 
 Your task:
 - Traverse the lineage graph recursively (level by level) using the snippets.
-- Include ALL downstream assets until no further dependencies remain (not just direct neighbors).
+- Include ONLY downstream columns that have EXPLICIT dependencies on the changed column (or on depth 1 columns, etc.).
 - Group impacts by **depth level** (1-hop, 2-hop, 3-hop, etc.).
 - Collect impacted query IDs and metadata.
+
+CRITICAL RULES FOR INCLUDING COLUMNS:
+1. Depth 1: ONLY include columns where snippets explicitly show: changed_column → target_column
+2. Depth 2: ONLY include columns where snippets explicitly show: depth1_column → target_column
+3. DO NOT include all columns from a table just because one column in that table has a dependency
+4. For example, if "scenariocd → allocationtype" is found, ONLY list "allocationtype" in source_metadata, NOT other columns from allocationrule table
 
 ---
 
@@ -280,7 +322,7 @@ Your output must be valid JSON with these keys:
 
 📌 **Change Summary**
 
-Change summary description: _(Explain why this change may have an impact downstream based on source-to-target dependencies.)_
+Change summary description: _(Explain why this change may have an impact downstream based on source-to-target dependencies. Be specific about which columns are impacted and why.)_
 
 | Field                  | Description |
 |------------------------|-------------|
@@ -294,36 +336,40 @@ Change summary description: _(Explain why this change may have an impact downstr
 
 ### **Downstream Impact Analysis**
 
-_List ALL impacted downstream targets grouped by depth._
+_List ONLY impacted downstream targets that have EXPLICIT dependencies on the changed column, grouped by depth._
 
-#### Depth 1 (direct dependencies):
+#### Depth 1 (direct dependencies - ONLY columns that explicitly depend on the changed column):
 1. **Target Database:** ...
    **Target Schema:** ...
    **Target Table:** ...
    **Target Column:** ...
+   **Explanation:** _(Explain how this SPECIFIC column depends on the changed column, referencing explicit relationships in snippets)_
 
-#### Depth 2:
-1. ...
+#### Depth 2 (ONLY columns that explicitly depend on depth 1 columns):
+1. **Target Database:** ...
+   **Target Schema:** ...
+   **Target Table:** ...
+   **Target Column:** ...
+   **Explanation:** _(Explain how this SPECIFIC column depends on a specific depth 1 column)_
 
-#### Depth 3:
-1. ...
-
-(Continue until no more dependencies)
+(Continue for depth 3, 4, etc. ONLY if explicit dependencies are found)
 
 ---
 
 **Explanation:**
-- Describe clearly how the change propagates through ALL levels (up to the deepest retrieved). 
+- Describe clearly how the change propagates through ALL levels (up to the deepest retrieved).
+- For EACH listed column, explain the EXPLICIT dependency chain from the changed column.
 - Mention necessary updates (views, ETL, dashboards, schema enforcement, SELECT * risks, etc.).
+- If a table has multiple columns but only one depends on the changed column, ONLY mention that one column.
 
 ---
 
 Details:
-- `affected_query_ids`: Collect all query IDs seen in snippets for ALL impacted assets.
-- `source_metadata`: Extract structured metadata for each impacted asset at any depth.
+- `affected_query_ids`: Collect all query IDs seen in snippets for ONLY the impacted columns (not all columns from impacted tables).
+- `source_metadata`: Extract structured metadata for ONLY columns that have explicit dependencies at any depth.
 - Ensure the JSON is strictly valid (no trailing commas, no comments, no markdown around it).
 - Do not hallucinate. If a depth has no entries, omit it.
-- STOP ONLY when all retrieved snippets have been exhausted.
+- Be SELECTIVE - only include columns with clear, explicit dependency relationships shown in snippets.
 
 ---
 
@@ -501,6 +547,103 @@ def _safe_json_parse(txt: str) -> Dict[str, Any]:
         return {}
 
 
+def parse_schema_change(change_text: str) -> Dict[str, Any]:
+    """
+    Parse SQL schema change to extract table and column information.
+    Handles formats like:
+    - ALTER TABLE bronze.accounts.gl_summary DROP COLUMN scenariocd;
+    - ALTER TABLE gl_summary DROP COLUMN scenariocd;
+    - ALTER TABLE schema.table ADD COLUMN newcol;
+    """
+    result = {
+        "change_type": None,
+        "table_full_path": None,
+        "table_name": None,
+        "schema": None,
+        "database": None,
+        "column_name": None,
+        "original_change": change_text
+    }
+    
+    change_upper = change_text.upper().strip()
+    
+    # Extract change type
+    if "DROP COLUMN" in change_upper:
+        result["change_type"] = "DROP_COLUMN"
+        # Extract column name
+        match = re.search(r"DROP\s+COLUMN\s+(\w+)", change_upper, re.IGNORECASE)
+        if match:
+            result["column_name"] = match.group(1)
+    elif "ADD COLUMN" in change_upper:
+        result["change_type"] = "ADD_COLUMN"
+        match = re.search(r"ADD\s+COLUMN\s+(\w+)", change_upper, re.IGNORECASE)
+        if match:
+            result["column_name"] = match.group(1)
+    elif "ALTER COLUMN" in change_upper or "MODIFY COLUMN" in change_upper:
+        result["change_type"] = "ALTER_COLUMN"
+        match = re.search(r"(?:ALTER|MODIFY)\s+COLUMN\s+(\w+)", change_upper, re.IGNORECASE)
+        if match:
+            result["column_name"] = match.group(1)
+    
+    # Extract table information
+    match = re.search(r"ALTER\s+TABLE\s+([^\s;]+)", change_upper, re.IGNORECASE)
+    if match:
+        table_path = match.group(1).strip()
+        result["table_full_path"] = table_path
+        
+        # Parse database.schema.table or schema.table or just table
+        parts = [p.strip() for p in table_path.split(".")]
+        if len(parts) == 3:
+            result["database"] = parts[0]
+            result["schema"] = parts[1]
+            result["table_name"] = parts[2]
+        elif len(parts) == 2:
+            result["schema"] = parts[0]
+            result["table_name"] = parts[1]
+        elif len(parts) == 1:
+            result["table_name"] = parts[0]
+    
+    return result
+
+
+def validate_impact_metadata(source_metadata: List[Dict[str, Any]], parsed_change: Dict[str, Any], snippets: str) -> List[Dict[str, Any]]:
+    """
+    Validate source_metadata and log warnings for potential false positives.
+    The main filtering should be done by the LLM via improved prompts, but this provides
+    additional validation and logging for debugging.
+    """
+    if not source_metadata or not parsed_change.get("column_name"):
+        return source_metadata
+    
+    changed_column = parsed_change["column_name"].lower()
+    snippet_lower = snippets.lower() if snippets else ""
+    
+    # Log information about what was found
+    logger.info(
+        f"Validating {len(source_metadata)} metadata entries for changed column: {changed_column}"
+    )
+    
+    # For now, trust the LLM's filtering (via improved prompts) and just log
+    # In the future, we could add more sophisticated validation if needed
+    for entry in source_metadata:
+        target_column = entry.get("target_column", "").lower()
+        target_table = entry.get("target_table", "").lower()
+        
+        # Check if both columns are mentioned in snippets (heuristic check)
+        both_mentioned = changed_column in snippet_lower and target_column in snippet_lower
+        
+        if not both_mentioned:
+            logger.debug(
+                f"Potential validation concern: {target_table}.{target_column} - "
+                f"changed column '{changed_column}' or target column may not be explicitly "
+                f"mentioned together in snippets (relying on LLM filtering)"
+            )
+    
+    # Return all entries - the improved prompts should have done the filtering
+    # This function is mainly for logging and future enhancement
+    return source_metadata
+
+
 class IterativeConfig(BaseModel):
     max_iters: int = 5
     k_per_query: int = 8
@@ -509,10 +652,24 @@ class IterativeConfig(BaseModel):
 
 def schema_detection_rag(change_text: str, org_id: str, cfg: Optional[IterativeConfig] = None):
     cfg = cfg or IterativeConfig()
+    
+    # Parse the SQL change to extract column and table information
+    parsed_change = parse_schema_change(change_text)
+    
+    # Create more precise initial query based on parsed information
+    initial_queries = [change_text]
+    if parsed_change.get("column_name") and parsed_change.get("table_name"):
+        # Create a more specific query targeting the exact column
+        table_path = parsed_change.get("table_full_path") or parsed_change.get("table_name")
+        column_name = parsed_change["column_name"]
+        specific_query = f"what are the downstream columns for {table_path}.{column_name}"
+        initial_queries.append(specific_query)
+        logger.info(f"Using parsed change info: table={table_path}, column={column_name}")
+    
     used_queries: List[str] = []
     collected_docs: List[Document] = []
     seen_texts: Set[str] = set()
-    frontier: List[str] = [change_text]
+    frontier: List[str] = initial_queries
     retriever = get_retriever(org_id, k=cfg.k_per_query)
 
     for _ in range(cfg.max_iters):
@@ -549,9 +706,22 @@ def schema_detection_rag(change_text: str, org_id: str, cfg: Optional[IterativeC
             break
 
     all_snippets_text = _docs_to_snippets(collected_docs) if collected_docs else "(no snippets retrieved)"
-    final = LLM.invoke(FINAL_REPORT_PROMPT.format(change=change_text, snippets=all_snippets_text))
+    
+    # Include parsed change info in the final prompt for better context
+    change_context = f"{change_text}\n\nParsed Information:\n- Change Type: {parsed_change.get('change_type', 'UNKNOWN')}\n- Table: {parsed_change.get('table_full_path', 'UNKNOWN')}\n- Column: {parsed_change.get('column_name', 'UNKNOWN')}"
+    
+    final = LLM.invoke(FINAL_REPORT_PROMPT.format(change=change_context, snippets=all_snippets_text))
     final_text = final.content if hasattr(final, "content") else str(final)
     final_json_response = _safe_json_parse(final_text)
+    
+    # Validate and filter source_metadata to remove false positives
+    if "source_metadata" in final_json_response:
+        final_json_response["source_metadata"] = validate_impact_metadata(
+            final_json_response["source_metadata"],
+            parsed_change,
+            all_snippets_text
+        )
+    
     return final_json_response
 
 

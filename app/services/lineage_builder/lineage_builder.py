@@ -560,44 +560,69 @@ def apply_scd_type2(engine, model_class, current_df: pd.DataFrame, historical_df
     historical_df['org_id'] = historical_df['org_id'].astype(str)
     historical_df['connection_id'] = historical_df['connection_id'].astype(str)
 
+    # First, deduplicate current_df to avoid inserting duplicates within the same batch
+    current_df = current_df.drop_duplicates(subset=key_cols, keep='first')
+    
     current_targets = current_df[target_cols].drop_duplicates()
 
+    # Get all active historical records (historical_df should already be filtered to is_active=1 from query)
+    # But ensure we're working with all historical records to prevent duplicates across batches
+    historical_active_all = historical_df.copy()
+    
+    # Also get historical records matching current targets for deactivation logic
     historical_active = historical_df[
         historical_df.set_index(target_cols).index.isin(current_targets.set_index(target_cols).index)
     ].copy()
 
     current_df["is_active"] = 1
 
-    merged = current_df.merge(
-        historical_active[key_cols + ["id"]],
-        on=key_cols,
-        how="outer",
-        indicator=True,
-        suffixes=("", "_hist")
-    )
-
-    # to deactivate → only in history
-    to_deactivate = merged[merged["_merge"] == "right_only"]
-
-    # to insert → only in current
-    to_insert = merged[merged["_merge"] == "left_only"]
+    # Check against ALL active historical records to prevent duplicates
+    # This ensures we don't insert the same lineage edge if it already exists (regardless of batch_id)
+    if not historical_active_all.empty and "id" in historical_active_all.columns:
+        merged_all = current_df.merge(
+            historical_active_all[key_cols + ["id"]],
+            on=key_cols,
+            how="left",
+            indicator=True,
+            suffixes=("", "_hist")
+        )
+        
+        # Only insert records that don't exist in ANY active historical record
+        to_insert = merged_all[merged_all["_merge"] == "left_only"].drop(columns=["_merge", "id"], errors="ignore")
+    else:
+        # If no historical data, all current records are new
+        to_insert = current_df.copy()
+    
+    # For deactivation, check against records matching current targets
+    if not historical_active.empty and "id" in historical_active.columns:
+        merged = current_df.merge(
+            historical_active[key_cols + ["id"]],
+            on=key_cols,
+            how="outer",
+            indicator=True,
+            suffixes=("", "_hist")
+        )
+        # to deactivate → only in history (records that existed but are no longer in current)
+        to_deactivate = merged[merged["_merge"] == "right_only"]
+    else:
+        to_deactivate = pd.DataFrame()
    # Case: target matches but source cols are NULL (static derivations)
     # For these, if already exist in history, don't insert duplicate.
     if not to_insert.empty:
         null_sources = to_insert[
             to_insert[["source_database", "source_schema", "source_table", "source_column"]].isnull().all(axis=1)
         ]
-        if not null_sources.empty:
-            # filter out ones already present in history
+        if not null_sources.empty and not historical_active_all.empty:
+            # filter out ones already present in ALL historical records (not just matching targets)
             already_in_history = null_sources.merge(
-                historical_active,
+                historical_active_all,
                 on=target_cols + ["target_column"],
                 how="inner"
             )
             to_insert = pd.concat([
                 to_insert.drop(null_sources.index),
                 null_sources.loc[~null_sources.index.isin(already_in_history.index)]
-            ])
+            ]).reset_index(drop=True)
 
     deactivated_count, inserted_count = 0, 0
 
@@ -728,7 +753,7 @@ def lineage_builder(org_id, conn_id, batch_id):
                     if lineage_process.returncode != 0:
                         logging.warning(f"[{query_id}] sqllineage warning: {lineage_process.stderr}")
 
-                    all_edges.extend(sqllineage_lineage.parse_lineage_text(
+                    parsed_edges = sqllineage_lineage.parse_lineage_text(
                         query_id,
                         cleaned_query,
                         query_type,
@@ -738,7 +763,11 @@ def lineage_builder(org_id, conn_id, batch_id):
                         schema_name,
                         information_schema_columns_df,
                         lineage_output,
-                    ))
+                    )
+                    if parsed_edges:
+                        all_edges.extend(parsed_edges)
+                    else:
+                        logging.warning(f"[{query_id}] parse_lineage_text returned no edges; skipping")
 
                 # Only collect valid lineage
                 if final_lineage and not all(v is None for v in final_lineage.values()):
