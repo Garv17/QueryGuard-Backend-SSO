@@ -1,3 +1,4 @@
+
 import sys
 import os
 import numpy as np
@@ -7,22 +8,42 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from .sql_lineage_builder import build_lineage
 import logging
-from . import sqllineage_lineage
 import pandas as pd
 import ast
 import subprocess
+import re
 from sqlalchemy import create_engine, text, update, func
-from .filter_clause_columns import get_dependent_columns
 from sqlalchemy.orm import Session
 import uuid
 from datetime import datetime, timezone
-from app.utils.models import (
-    ColumnLevelLineage,
-    FilterClauseColumnLineage,
-    LineageLoadWatermark
-)
+from collections import defaultdict
+
+# Handle imports for both direct execution and package import
+try:
+    from .sql_lineage_builder import build_lineage
+    from . import sqllineage_lineage
+    from .filter_clause_columns import get_dependent_columns
+    from app.utils.models import (
+        ColumnLevelLineage,
+        FilterClauseColumnLineage,
+        LineageLoadWatermark
+    )
+except ImportError:
+    # When running directly, use absolute imports
+    from sql_lineage_builder import build_lineage
+    import sqllineage_lineage
+    from filter_clause_columns import get_dependent_columns
+    # Add the app directory to path for direct execution
+    import sys
+    app_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    if app_path not in sys.path:
+        sys.path.insert(0, app_path)
+    from utils.models import (
+        ColumnLevelLineage,
+        FilterClauseColumnLineage,
+        LineageLoadWatermark
+    )
 
 logger = logging.getLogger("lineage")   # Named logger instead of root
 logger.setLevel(logging.INFO)
@@ -57,13 +78,32 @@ all_lineages = []
 all_edges = []
 
 def extract_sql_lineage_source_to_target(sql: str) -> dict:
-    """Extract SQL lineage showing both source-to-temp-view and temp-view-to-target mappings"""
+    """
+    Enhanced extract SQL lineage showing both source-to-temp-view and temp-view-to-target mappings.
+    This version recursively traces through multiple CTE levels to find missing column lineage.
+    """
     lineage = build_lineage(sql, dialect="snowflake", enhanced_mode=True)
 
+    # Build a comprehensive mapping graph from all lineage mappings
+    all_mappings = lineage.get("source_to_target", [])
+    
+    # Create a graph structure: target -> [sources]
+    lineage_graph = defaultdict(list)
+    reverse_graph = defaultdict(list)  # source -> [targets]
+    
+    for mapping in all_mappings:
+        parts = mapping.split(" <- ")
+        if len(parts) == 2:
+            target = parts[0].lower()
+            source = parts[1].lower()
+            lineage_graph[target].append(source)
+            reverse_graph[source].append(target)
+    
+    # Separate temp view mappings and target mappings
     temp_view_mappings = []
     target_mappings = []
-
-    for mapping in lineage.get("source_to_target", []):
+    
+    for mapping in all_mappings:
         parts = mapping.split(" <- ")
         if len(parts) == 2:
             left_side = parts[0].lower()
@@ -78,7 +118,8 @@ def extract_sql_lineage_source_to_target(sql: str) -> dict:
                     temp_view_mappings.append(mapping)
                 else:
                     target_mappings.append(mapping)
-
+    
+    # Build source_to_temp_view mapping
     source_to_temp_view = {}
     for mapping in temp_view_mappings:
         parts = mapping.split(" <- ")
@@ -86,7 +127,8 @@ def extract_sql_lineage_source_to_target(sql: str) -> dict:
             target_col = parts[0].lower()
             source_col = parts[1].lower()
             source_to_temp_view.setdefault(target_col, []).append(source_col)
-
+    
+    # Build temp_view_to_target mapping
     temp_view_to_target = {}
     for mapping in target_mappings:
         parts = mapping.split(" <- ")
@@ -94,16 +136,301 @@ def extract_sql_lineage_source_to_target(sql: str) -> dict:
             target_col = parts[0].lower()
             source_col = parts[1].lower()
             temp_view_to_target.setdefault(target_col, []).append(source_col)
-
+    
+    # Memoization cache to avoid recalculating the same columns
+    resolution_cache = {}
+    
+    def resolve_column_recursively(target_col: str, visited: set = None, max_depth: int = 10, is_top_level: bool = False) -> list:
+        """
+        Recursively resolve a column through the lineage graph.
+        This handles cases where columns go through multiple CTE levels.
+        Uses memoization to avoid redundant calculations.
+        """
+        # Check cache first (only if this is a top-level call)
+        if is_top_level and target_col in resolution_cache:
+            return resolution_cache[target_col]
+        
+        if visited is None:
+            visited = set()
+            is_top_level = True
+        
+        if target_col in visited or max_depth <= 0:
+            return []
+        
+        visited.add(target_col)
+        sources = []
+        
+        # Check the general lineage graph first (most comprehensive)
+        if target_col in lineage_graph:
+            for intermediate_col in lineage_graph[target_col]:
+                if intermediate_col not in visited:
+                    # Check if this is a base table (not a CTE/temp view)
+                    if "__dbt_tmp" not in intermediate_col.lower() and "." in intermediate_col:
+                        # Likely a base table, but check if it has further mappings
+                        if intermediate_col in reverse_graph:
+                            # This column is used by other columns, might be intermediate
+                            # Use cache if available, otherwise recurse
+                            if intermediate_col in resolution_cache:
+                                deeper_sources = resolution_cache[intermediate_col]
+                            else:
+                                deeper_sources = resolve_column_recursively(intermediate_col, visited.copy(), max_depth - 1, False)
+                            if deeper_sources:
+                                sources.extend(deeper_sources)
+                            else:
+                                sources.append(intermediate_col)
+                        else:
+                            # No reverse mappings, likely a final source
+                            sources.append(intermediate_col)
+                    else:
+                        # It's a temp view/CTE, resolve it recursively
+                        # Use cache if available
+                        if intermediate_col in resolution_cache:
+                            recursive_sources = resolution_cache[intermediate_col]
+                        else:
+                            recursive_sources = resolve_column_recursively(intermediate_col, visited.copy(), max_depth - 1, False)
+                        if recursive_sources:
+                            sources.extend(recursive_sources)
+        
+        # Also check temp_view_to_target and source_to_temp_view for explicit mappings
+        if target_col in temp_view_to_target:
+            for tmp_col in temp_view_to_target[target_col]:
+                if tmp_col not in visited:
+                    # Check if tmp_col has mappings in source_to_temp_view
+                    if tmp_col in source_to_temp_view:
+                        for src_col in source_to_temp_view[tmp_col]:
+                            if src_col not in visited:
+                                # Check if this source is a base table or needs further resolution
+                                if "__dbt_tmp" not in src_col.lower() and "." in src_col:
+                                    if src_col in reverse_graph:
+                                        # Might have further mappings
+                                        if src_col in resolution_cache:
+                                            deeper_sources = resolution_cache[src_col]
+                                        else:
+                                            deeper_sources = resolve_column_recursively(src_col, visited.copy(), max_depth - 1, False)
+                                        if deeper_sources:
+                                            sources.extend(deeper_sources)
+                                        else:
+                                            sources.append(src_col)
+                                    else:
+                                        sources.append(src_col)
+                                else:
+                                    # Recursively resolve
+                                    if src_col in resolution_cache:
+                                        recursive_sources = resolution_cache[src_col]
+                                    else:
+                                        recursive_sources = resolve_column_recursively(src_col, visited.copy(), max_depth - 1, False)
+                                    if recursive_sources:
+                                        sources.extend(recursive_sources)
+                    else:
+                        # Recursively resolve the intermediate column
+                        if tmp_col in resolution_cache:
+                            recursive_sources = resolution_cache[tmp_col]
+                        else:
+                            recursive_sources = resolve_column_recursively(tmp_col, visited.copy(), max_depth - 1, False)
+                        if recursive_sources:
+                            sources.extend(recursive_sources)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_sources = []
+        for src in sources:
+            if src not in seen:
+                seen.add(src)
+                unique_sources.append(src)
+        
+        # Cache the result if this was a top-level call
+        if is_top_level:
+            resolution_cache[target_col] = unique_sources
+        
+        return unique_sources
+    
+    # Build final lineage with recursive resolution
     final_lineage = {}
+    
+    # First, process all target mappings (optimized to use cache)
     for target, tmp_list in temp_view_to_target.items():
         sources = []
         for tmp in tmp_list:
             if tmp in source_to_temp_view:
-                sources.extend(source_to_temp_view[tmp])
-        final_lineage[target] = sources if sources else None
-
-    return final_lineage
+                # Direct mapping found
+                for src in source_to_temp_view[tmp]:
+                    # Check if this source needs further resolution
+                    if "__dbt_tmp" not in src.lower() and "." in src:
+                        # Check if it's truly a base table or has further mappings
+                        if src in reverse_graph:
+                            # Has reverse mappings, might be intermediate
+                            # Use cache if available
+                            if src in resolution_cache:
+                                deeper_sources = resolution_cache[src]
+                            else:
+                                deeper_sources = resolve_column_recursively(src, None, 10, True)
+                            if deeper_sources:
+                                sources.extend(deeper_sources)
+                            else:
+                                sources.append(src)
+                        else:
+                            sources.append(src)
+                    else:
+                        # Recursively resolve (will use cache)
+                        if src in resolution_cache:
+                            recursive_sources = resolution_cache[src]
+                        else:
+                            recursive_sources = resolve_column_recursively(src, None, 10, True)
+                        if recursive_sources:
+                            sources.extend(recursive_sources)
+            else:
+                # Try recursive resolution for missing intermediate mappings (will use cache)
+                if tmp in resolution_cache:
+                    recursive_sources = resolution_cache[tmp]
+                else:
+                    recursive_sources = resolve_column_recursively(tmp, None, 10, True)
+                if recursive_sources:
+                    sources.extend(recursive_sources)
+        
+        # If still no sources found, try resolving the target directly from lineage graph
+        if not sources:
+            if target in resolution_cache:
+                recursive_sources = resolution_cache[target]
+            else:
+                recursive_sources = resolve_column_recursively(target, None, 10, True)
+            if recursive_sources:
+                sources.extend(recursive_sources)
+        
+        # Remove duplicates
+        if sources:
+            seen = set()
+            unique_sources = []
+            for src in sources:
+                if src not in seen:
+                    seen.add(src)
+                    unique_sources.append(src)
+            final_lineage[target] = unique_sources
+        else:
+            final_lineage[target] = None
+    
+    # Also handle any target columns that weren't in temp_view_to_target
+    # but might be in the general lineage graph (handles missing columns)
+    for mapping in all_mappings:
+        parts = mapping.split(" <- ")
+        if len(parts) == 2:
+            target_col = parts[0].lower()
+            source_col = parts[1].lower()
+            
+            # Skip if it's a temp view mapping (already handled above)
+            if "__dbt_tmp" in target_col and "__dbt_tmp" not in source_col:
+                # This is source_to_temp_view mapping, skip for now
+                continue
+            
+            # If target is not in final_lineage, try to resolve it (use cache)
+            if target_col not in final_lineage:
+                # Check if source is a base table
+                if "__dbt_tmp" not in source_col.lower() and "." in source_col:
+                    # Check if it has further mappings
+                    if source_col in reverse_graph:
+                        if source_col in resolution_cache:
+                            recursive_sources = resolution_cache[source_col]
+                        else:
+                            recursive_sources = resolve_column_recursively(source_col, None, 10, True)
+                        if recursive_sources:
+                            final_lineage[target_col] = recursive_sources
+                        else:
+                            final_lineage[target_col] = [source_col]
+                    else:
+                        final_lineage[target_col] = [source_col]
+                else:
+                    # Source is a CTE/temp view, resolve it recursively (use cache)
+                    if source_col in resolution_cache:
+                        recursive_sources = resolution_cache[source_col]
+                    else:
+                        recursive_sources = resolve_column_recursively(source_col, None, 10, True)
+                    if recursive_sources:
+                        final_lineage[target_col] = recursive_sources
+                    else:
+                        # Even if recursive resolution fails, keep the mapping
+                        final_lineage[target_col] = [source_col]
+    
+    # Additional pass: for any columns in the lineage graph that weren't captured,
+    # try to find their sources by column name matching
+    # This helps with cases where intermediate CTEs use star expansions
+    # Only process columns that weren't already handled (optimization)
+    all_target_cols = set(final_lineage.keys())
+    for target_col in lineage_graph.keys():
+        if target_col not in all_target_cols:
+            # This column wasn't captured, try to resolve it (use cache)
+            if target_col in resolution_cache:
+                recursive_sources = resolution_cache[target_col]
+            else:
+                recursive_sources = resolve_column_recursively(target_col, None, 10, True)
+            if recursive_sources:
+                final_lineage[target_col] = recursive_sources
+    
+    # Propagate sources from temp view columns to final target columns
+    # When we have a temp view column (e.g., customerissue__dbt_tmp.id),
+    # we should also add the final target column (e.g., customerissue.id) with the same sources
+    for col_name, sources in list(final_lineage.items()):
+        if "__dbt_tmp" in col_name.lower() and sources:
+            # Extract the final target column name by removing __dbt_tmp
+            # Format: database.schema.table__dbt_tmp.column -> database.schema.table.column
+            parts = col_name.split(".")
+            if len(parts) >= 2:
+                table_part = parts[-2]  # Get the table part
+                column_part = parts[-1]  # Get the column part
+                
+                # Remove __dbt_tmp from table name (case-insensitive)
+                if "__dbt_tmp" in table_part.lower():
+                    # Use case-insensitive replacement
+                    final_table = re.sub(r"__dbt_tmp", "", table_part, flags=re.IGNORECASE)
+                    # Reconstruct the final target column name
+                    if len(parts) == 2:
+                        # Format: table__dbt_tmp.column
+                        final_target_col = f"{final_table}.{column_part}"
+                    elif len(parts) == 3:
+                        # Format: schema.table__dbt_tmp.column
+                        final_target_col = f"{parts[0]}.{final_table}.{column_part}"
+                    elif len(parts) == 4:
+                        # Format: database.schema.table__dbt_tmp.column
+                        final_target_col = f"{parts[0]}.{parts[1]}.{final_table}.{column_part}"
+                    else:
+                        # Handle longer paths
+                        final_target_col = ".".join(parts[:-2]) + f".{final_table}.{column_part}"
+                    
+                    # Normalize to lowercase for consistency
+                    final_target_col = final_target_col.lower()
+                    
+                    # Add the final target column with the same sources if it doesn't exist
+                    if final_target_col not in final_lineage:
+                        final_lineage[final_target_col] = sources
+                    elif final_lineage[final_target_col] is None:
+                        # If it exists but has no sources, use the temp view sources
+                        final_lineage[final_target_col] = sources
+                    else:
+                        # If it already has sources, merge them (avoid duplicates)
+                        existing_sources = set(final_lineage[final_target_col])
+                        new_sources = set(sources)
+                        merged_sources = list(existing_sources | new_sources)
+                        final_lineage[final_target_col] = merged_sources
+    
+    # Filter out entries where source columns contain __dbt_tmp
+    # We don't want temp view columns as sources in the final output
+    # Also remove temp view columns themselves from the output
+    filtered_lineage = {}
+    for target_col, sources in final_lineage.items():
+        # Skip temp view columns themselves (don't include them in output)
+        if "__dbt_tmp" in target_col.lower():
+            continue
+        
+        if sources is None:
+            filtered_lineage[target_col] = None
+        else:
+            # Filter out sources that contain __dbt_tmp
+            filtered_sources = [src for src in sources if "__dbt_tmp" not in src.lower()]
+            if filtered_sources:
+                filtered_lineage[target_col] = filtered_sources
+            else:
+                # If all sources were filtered out, set to None
+                filtered_lineage[target_col] = None
+    
+    return filtered_lineage
 
 def consolidate_lineage(all_lineages: list, all_edges: list) -> pd.DataFrame:
     """
@@ -184,18 +511,25 @@ def consolidate_lineage(all_lineages: list, all_edges: list) -> pd.DataFrame:
 
         # Apply filters
         mask = (
-            (all_edges_records_df["source_database"].notna() | all_edges_records_df["source_schema"].notna()) &  # Keep if at least one exists
-            (all_edges_records_df["source_schema"].str.lower().fillna("") != "<default>") &
+            (all_edges_records_df["source_database"].notna() | all_edges_records_df["source_schema"].notna()) &
             (all_edges_records_df["target_schema"].str.lower().fillna("") != "<default>") &
-            (~all_edges_records_df["source_table"].str.lower().fillna("").str.contains("__dbt_tmp")) &
             (~all_edges_records_df["target_table"].str.lower().fillna("").str.contains("__dbt_tmp")) &
             (all_edges_records_df["source_column"].str.strip().fillna("") != "*")
         )
-
         all_edges_records_df = all_edges_records_df[mask]
-    else:
-        all_edges_records_df = pd.DataFrame()
 
+        # Replace unwanted values in source_schema and source_table with None
+        all_edges_records_df.loc[
+            all_edges_records_df["source_schema"].str.lower().fillna("") == "<default>",
+            ["source_schema", "source_database"]
+        ] = None
+
+        all_edges_records_df.loc[
+            all_edges_records_df["source_table"].str.lower().fillna("").str.contains("__dbt_tmp"),
+            ["source_table", "source_schema", "source_database", "source_column"]
+        ] = None
+
+        
     # Concatenate the two DataFrames
     df = pd.concat([all_lineages_records_df, all_edges_records_df], ignore_index=True)
 
@@ -451,7 +785,10 @@ def lineage_builder(org_id, conn_id, batch_id):
                 lambda x: str(x) if isinstance(x, list) else x
             )
         logger.info("Query IDs converted to strings")
-        
+       
+        final_df.to_csv("C:/Users/User/Documents/12-09-2025_lineage_final/final_df.csv", index=False)
+        logger.info("final_df saved as csv")
+
         consolidated_df = consolidate_lineage(all_lineages, all_edges)
         logger.info("Lineage consolidated, %d records in consolidated_df", len(consolidated_df))
         
@@ -465,14 +802,17 @@ def lineage_builder(org_id, conn_id, batch_id):
         consolidated_df["query_id"] = consolidated_df["query_id"].apply(
                 lambda x: str(x) if isinstance(x, list) else x
             )
+        consolidated_df.to_csv("C:/Users/User/Documents/12-09-2025_lineage_final/consolidated_df.csv", index=False)
+        logger.info("Consolidated_df saved as csv")
         logger.info("Consolidated query IDs converted to strings")
+
 
         filter_clause_df = pd.merge(consolidated_df, final_df, on="query_id", how="inner")
         logger.info("Filter clause DataFrame merged, %d records", len(filter_clause_df))
         
         rows = get_dependent_columns(filter_clause_df)
         logger.info("Dependent columns extracted, %d rows", len(rows) if rows else 0)
-    
+
         if rows:
             final_filter_clause_df = pd.DataFrame(rows)
             final_filter_clause_df.drop_duplicates(
@@ -497,6 +837,10 @@ def lineage_builder(org_id, conn_id, batch_id):
                 logger.info("Added org_id, connection_id, and batch_id columns to final_filter_clause_df")
         else:
             final_filter_clause_df = pd.DataFrame()
+
+        final_filter_clause_df.to_csv("C:/Users/User/Documents/12-09-2025_lineage_final/final_filter_clause_df.csv", index=False)
+        logger.info("final_filter_clause_df saved as csv")
+
 
         if not consolidated_df.empty:
             try:
@@ -563,3 +907,48 @@ def lineage_builder(org_id, conn_id, batch_id):
         logger.critical("Fatal error in main execution: %s", e)
         logger.critical("Full traceback: %s", traceback.format_exc())
         raise
+
+
+
+# if __name__ == "__main__":
+#     org_id = "76d33fb3-6062-456b-a211-4aec9971f8be"
+#     batch_id = "32f55d8f-4731-4810-aeb8-4cec0d5ae989"
+#     connection_id = "4aeb318b-6819-4873-9fae-33bab55ac922"
+#     lineage_builder(org_id, connection_id, batch_id)
+#     consolidated_df = pd.read_csv("C:/Users/User/Documents/lineage_files/11-28-2025/consolidated_df.csv")
+#     final_df = pd.read_csv("C:/Users/User/Documents/lineage_files/11-28-2025/final_df.csv")
+#     # final_df['base_objects_accessed'] = final_df['base_objects_accessed'].apply(ast.literal_eval)
+#     logger.info("Base objects accessed parsed successfully")
+#     filter_clause_df = pd.merge(consolidated_df, final_df, on="query_id", how="inner")
+#     logger.info("Filter clause DataFrame merged, %d records", len(filter_clause_df))
+    
+#     rows = get_dependent_columns(filter_clause_df)
+#     logger.info("Dependent columns extracted, %d rows", len(rows) if rows else 0)
+
+#     if rows:
+#         final_filter_clause_df = pd.DataFrame(rows)
+#         final_filter_clause_df.drop_duplicates(
+#         subset=[
+#             "source_database", "source_schema", "source_table", "source_column",
+#             "target_database", "target_schema", "target_table", "target_column"
+#         ],
+#         inplace=True
+#         )
+#         mask = ~(
+#         final_filter_clause_df["source_database"].fillna("").eq("") &
+#         final_filter_clause_df["source_schema"].fillna("").eq("")
+#         )
+
+#         final_filter_clause_df = final_filter_clause_df[mask]
+        
+#         # Add required columns for SCD Type 2 processing
+#         if not final_filter_clause_df.empty:
+#             final_filter_clause_df["org_id"] = org_id
+#             final_filter_clause_df["connection_id"] = connection_id
+#             final_filter_clause_df["batch_id"] = batch_id
+#             logger.info("Added org_id, connection_id, and batch_id columns to final_filter_clause_df")
+#     else:
+#         final_filter_clause_df = pd.DataFrame()
+
+#     final_filter_clause_df.to_csv("C:/Users/User/Documents/lineage_files/11-28-2025/final_filter_clause_df.csv", index=False)
+#     logger.info("final_filter_clause_df saved as csv")
