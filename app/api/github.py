@@ -786,6 +786,30 @@ def deactivate_installation(installation_id: str, current_user: User = Depends(r
     return {"message": "GitHub installation deactivated successfully"}
 
 
+def extract_added_lines_from_patch(patch: str) -> str:
+    """
+    Extract only the added lines (lines starting with '+') from a GitHub diff patch.
+    Removes the '+' prefix and returns the new content.
+    
+    Args:
+        patch: The diff patch string from GitHub
+        
+    Returns:
+        String containing only the added lines (without the '+' prefix)
+    """
+    if not patch:
+        return ""
+    
+    added_lines = []
+    for line in patch.split('\n'):
+        # Lines starting with '+' are added lines (but not the hunk header which is @@)
+        if line.startswith('+') and not line.startswith('+++'):
+            # Remove the '+' prefix and add the line
+            added_lines.append(line[1:])
+    
+    return '\n'.join(added_lines)
+
+
 @router.post("/webhook")
 async def github_webhook(request: Request, db=Depends(get_db)):
     """Handle GitHub webhook events (PR events)"""
@@ -897,13 +921,39 @@ async def github_webhook(request: Request, db=Depends(get_db)):
         # Analyze each SQL change
         results = []
         for c in code_changes:
+            # Extract only the added lines (new content) from the patch
+            added_content = extract_added_lines_from_patch(c.get("patch", ""))
+            
+            # Create full_diff for logging/storage (includes full patch)
             full_diff = (
                 f"File: {c['filename']} ({c['status']}) [+{c['additions']}/-{c['deletions']}]\n{c['patch']}"
             )
+            
+            # Skip analysis if there are no added lines (only deletions)
+            if not added_content.strip():
+                logger.info("/github/webhook - no added content in %s, skipping analysis", c['filename'])
+                results.append(
+                    {
+                        "sql_change": full_diff,
+                        "impact_analysis": "No new content to analyze (file contains only deletions).",
+                        "affected_query_ids": [],
+                        "regression_queries": [],
+                        "source_metadata": [],
+                    }
+                )
+                continue
+            
+            # For analysis, use only the added content (new changes)
+            # Format it similar to full_diff but with only new content
+            analysis_input = (
+                f"File: {c['filename']} ({c['status']}) [+{c['additions']}/-{c['deletions']}]\n"
+                f"New changes:\n{added_content}"
+            )
+            
             if c["filename"].endswith(".sql") and "models/" in c["filename"]:
-                analysis_result = dbt_model_detection_rag(full_diff, c["filename"], str(installation.org_id), db)  # DBT model path
+                analysis_result = dbt_model_detection_rag(analysis_input, c["filename"], str(installation.org_id), db)  # DBT model path
             else:
-                analysis_result = schema_detection_rag(full_diff, str(installation.org_id))
+                analysis_result = schema_detection_rag(analysis_input, str(installation.org_id))
 
             regression_queries = fetch_queries(analysis_result.get("affected_query_ids", []))
 
