@@ -45,7 +45,7 @@ def send_password_reset_email(to_email: str, reset_token: str) -> bool:
         # Create message with HTML button
         body = f"""Hello,
 
-You have requested to reset your password for your QueryGuardAI account.
+You have requested to reset your password for your ZaneAI account.
 
 Click the button below to reset your password:
 
@@ -58,7 +58,7 @@ This link will expire in 60 minutes.
 If you did not request this password reset, please ignore this email.
 
 Best regards,
-QueryGuardAI Team"""
+ZaneAI Team"""
         
         # Create HTML email with button
         html_body = f"""<!DOCTYPE html>
@@ -82,7 +82,7 @@ QueryGuardAI Team"""
 </head>
 <body>
     <p>Hello,</p>
-    <p>You have requested to reset your password for your QueryGuardAI account.</p>
+    <p>You have requested to reset your password for your ZaneAI account.</p>
     <p>
         <a href="{reset_link}" class="button">Reset Password</a>
     </p>
@@ -90,7 +90,7 @@ QueryGuardAI Team"""
     <p><a href="{reset_link}">{reset_link}</a></p>
     <p>This link will expire in 60 minutes.</p>
     <p>If you did not request this password reset, please ignore this email.</p>
-    <p>Best regards,<br>QueryGuardAI Team</p>
+    <p>Best regards,<br>ZaneAI Team</p>
 </body>
 </html>"""
         
@@ -98,7 +98,7 @@ QueryGuardAI Team"""
         from email.mime.text import MIMEText as HTMLMIMEText
         
         msg = MIMEMultipart('alternative')
-        msg['Subject'] = "Password Reset - QueryGuardAI"
+        msg['Subject'] = "Password Reset - ZaneAI"
         msg['From'] = SMTP_FROM_EMAIL
         msg['To'] = to_email
         
@@ -162,17 +162,17 @@ def send_welcome_email(to_email: str, username: str) -> bool:
         # Create message
         body = f"""Hello {username},
 
-Welcome to QueryGuardAI! Your account has been created.
+Welcome to ZaneAI! Your account has been created.
 
 You will receive a separate email with a link to set your password.
 
 If you did not expect this email, please contact your administrator.
 
 Best regards,
-QueryGuardAI Team"""
+ZaneAI Team"""
         
         msg = MIMEText(body)
-        msg['Subject'] = "Welcome to QueryGuardAI"
+        msg['Subject'] = "Welcome to ZaneAI"
         msg['From'] = SMTP_FROM_EMAIL
         msg['To'] = to_email
         
@@ -235,7 +235,7 @@ def send_password_setup_email(to_email: str, username: str, reset_token: str) ->
         # Create message with HTML button
         body = f"""Hello {username},
 
-Your QueryGuardAI account has been created. To complete your account setup, please set your password by clicking the link below:
+Your ZaneAI account has been created. To complete your account setup, please set your password by clicking the link below:
 
 {reset_link}
 
@@ -246,7 +246,7 @@ This link will expire in 60 minutes.
 If you did not expect this email, please contact your administrator.
 
 Best regards,
-QueryGuardAI Team"""
+ZaneAI Team"""
         
         # Create HTML email with button
         html_body = f"""<!DOCTYPE html>
@@ -270,7 +270,7 @@ QueryGuardAI Team"""
 </head>
 <body>
     <p>Hello {username},</p>
-    <p>Your QueryGuardAI account has been created. To complete your account setup, please set your password by clicking the button below:</p>
+    <p>Your ZaneAI account has been created. To complete your account setup, please set your password by clicking the button below:</p>
     <p>
         <a href="{reset_link}" class="button">Set Password</a>
     </p>
@@ -278,7 +278,7 @@ QueryGuardAI Team"""
     <p><a href="{reset_link}">{reset_link}</a></p>
     <p>This link will expire in 60 minutes.</p>
     <p>If you did not expect this email, please contact your administrator.</p>
-    <p>Best regards,<br>QueryGuardAI Team</p>
+    <p>Best regards,<br>ZaneAI Team</p>
 </body>
 </html>"""
         
@@ -286,7 +286,7 @@ QueryGuardAI Team"""
         from email.mime.text import MIMEText as HTMLMIMEText
         
         msg = MIMEMultipart('alternative')
-        msg['Subject'] = "Set Your Password - QueryGuardAI"
+        msg['Subject'] = "Set Your Password - ZaneAI"
         msg['From'] = SMTP_FROM_EMAIL
         msg['To'] = to_email
         

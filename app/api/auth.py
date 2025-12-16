@@ -253,14 +253,20 @@ def login(user: UserLogin, db: Session = Depends(get_db), request: Request = Non
                 # Check connector setup status
                 connectors_status = check_connector_setup_status(db_user.org_id, db)
                 
-                # Check if all connectors are set up
-                all_setup = all(connectors_status.values())
+                # Previous logic: Check if all connectors are set up
+                # all_setup = all(connectors_status.values())
+                # if all_setup:
                 
-                if all_setup:
+                # Check if snowflake AND github connectors are set up
+                snowflake_setup = connectors_status.get("snowflake", False)
+                github_setup = connectors_status.get("github", False)
+                both_required_setup = snowflake_setup and github_setup
+                
+                if both_required_setup:
                     # Update the flag to True
                     organization.is_connection_setup = True
                     is_connection_setup = True
-                    logger.info("/auth/login - all connectors set up for org_id=%s, flag updated", db_user.org_id)
+                    logger.info("/auth/login - required connectors (snowflake & github) set up for org_id=%s, flag updated", db_user.org_id)
                 else:
                     is_connection_setup = False
                     missing_connectors = get_missing_connectors(connectors_status)
