@@ -786,8 +786,8 @@ def lineage_builder(org_id, conn_id, batch_id):
             )
         logger.info("Query IDs converted to strings")
        
-        final_df.to_csv("C:/Users/User/Documents/12-09-2025_lineage_final/final_df.csv", index=False)
-        logger.info("final_df saved as csv")
+        # final_df.to_csv("C:/Users/User/Documents/12-09-2025_lineage_final/final_df.csv", index=False)
+        # logger.info("final_df saved as csv")
 
         consolidated_df = consolidate_lineage(all_lineages, all_edges)
         logger.info("Lineage consolidated, %d records in consolidated_df", len(consolidated_df))
@@ -802,8 +802,8 @@ def lineage_builder(org_id, conn_id, batch_id):
         consolidated_df["query_id"] = consolidated_df["query_id"].apply(
                 lambda x: str(x) if isinstance(x, list) else x
             )
-        consolidated_df.to_csv("C:/Users/User/Documents/12-09-2025_lineage_final/consolidated_df.csv", index=False)
-        logger.info("Consolidated_df saved as csv")
+        # consolidated_df.to_csv("C:/Users/User/Documents/12-09-2025_lineage_final/consolidated_df.csv", index=False)
+        # logger.info("Consolidated_df saved as csv")
         logger.info("Consolidated query IDs converted to strings")
 
 
@@ -838,8 +838,8 @@ def lineage_builder(org_id, conn_id, batch_id):
         else:
             final_filter_clause_df = pd.DataFrame()
 
-        final_filter_clause_df.to_csv("C:/Users/User/Documents/12-09-2025_lineage_final/final_filter_clause_df.csv", index=False)
-        logger.info("final_filter_clause_df saved as csv")
+        # final_filter_clause_df.to_csv("C:/Users/User/Documents/12-09-2025_lineage_final/final_filter_clause_df.csv", index=False)
+        # logger.info("final_filter_clause_df saved as csv")
 
 
         if not consolidated_df.empty:
