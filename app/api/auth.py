@@ -253,22 +253,26 @@ def login(user: UserLogin, db: Session = Depends(get_db), request: Request = Non
                 # Check connector setup status
                 connectors_status = check_connector_setup_status(db_user.org_id, db)
                 
-                # Previous logic: Check if all connectors are set up
-                # all_setup = all(connectors_status.values())
-                # if all_setup:
+                # ===== CONNECTION SETUP LOGIC =====
+                # To switch back to checking ALL connectors, uncomment the block below
+                # and comment out the "REQUIRED CONNECTORS" block
                 
-                # Check if snowflake AND github connectors are set up
+                # OPTION 1: Check if ALL connectors are set up (previous logic)
+                # all_setup = all(connectors_status.values())
+                # is_connection_setup = all_setup
+                # log_msg = "all connectors" if all_setup else "missing connectors"
+                
+                # OPTION 2: Check if REQUIRED connectors (snowflake AND github) are set up (current logic)
                 snowflake_setup = connectors_status.get("snowflake", False)
                 github_setup = connectors_status.get("github", False)
-                both_required_setup = snowflake_setup and github_setup
+                is_connection_setup = snowflake_setup and github_setup
+                log_msg = "required connectors (snowflake & github)" if is_connection_setup else "missing connectors"
                 
-                if both_required_setup:
+                if is_connection_setup:
                     # Update the flag to True
                     organization.is_connection_setup = True
-                    is_connection_setup = True
-                    logger.info("/auth/login - required connectors (snowflake & github) set up for org_id=%s, flag updated", db_user.org_id)
+                    logger.info("/auth/login - %s set up for org_id=%s, flag updated", log_msg, db_user.org_id)
                 else:
-                    is_connection_setup = False
                     missing_connectors = get_missing_connectors(connectors_status)
                     logger.info("/auth/login - missing connectors for org_id=%s: %s", db_user.org_id, missing_connectors)
             else:
