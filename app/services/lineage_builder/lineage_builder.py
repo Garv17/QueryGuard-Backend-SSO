@@ -529,6 +529,8 @@ def consolidate_lineage(all_lineages: list, all_edges: list) -> pd.DataFrame:
             ["source_table", "source_schema", "source_database", "source_column"]
         ] = None
 
+    else:
+        all_edges_records_df = pd.DataFrame()
         
     # Concatenate the two DataFrames
     df = pd.concat([all_lineages_records_df, all_edges_records_df], ignore_index=True)
