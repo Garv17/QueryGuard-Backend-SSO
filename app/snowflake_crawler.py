@@ -139,14 +139,15 @@ def _fetch_delta_query_history(conn: SnowflakeConnection, since: datetime) -> tu
             pass
 
 def run_crawl_for_connection(db: Session, job: SnowflakeJob, now: datetime) -> None:
+    job = db.merge(job)
     conn: SnowflakeConnection = (
         db.query(SnowflakeConnection).filter(SnowflakeConnection.id == job.connection_id, SnowflakeConnection.is_active == True).first()
     )
     if not conn:
         logger.error("❌ Connection not found for job: %s", job.connection_id)
         return
-
     since = job.last_run_time or (now - timedelta(days=30))
+    logger.info(f"since: {since}")
     batch_id = uuid.uuid4()
     
     audit = SnowflakeCrawlAudit(
