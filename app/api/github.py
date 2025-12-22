@@ -384,15 +384,16 @@ def get_recursive_downstream_lineage(
     unique_direct_downstream = []
     for record in direct_downstream:
         # Create a unique key for this lineage record
+        # Use 'or ""' to handle None values (dict.get returns None if key exists with None value)
         record_key = (
-            record.get("source_database", "").lower(),
-            record.get("source_schema", "").lower(),
-            record.get("source_table", "").lower(),
-            record.get("source_column", "").lower(),
-            record.get("target_database", "").lower(),
-            record.get("target_schema", "").lower(),
-            record.get("target_table", "").lower(),
-            record.get("target_column", "").lower(),
+            (record.get("source_database") or "").lower(),
+            (record.get("source_schema") or "").lower(),
+            (record.get("source_table") or "").lower(),
+            (record.get("source_column") or "").lower(),
+            (record.get("target_database") or "").lower(),
+            (record.get("target_schema") or "").lower(),
+            (record.get("target_table") or "").lower(),
+            (record.get("target_column") or "").lower(),
         )
         
         # Only add if we haven't seen this exact lineage relationship before
@@ -410,6 +411,10 @@ def get_recursive_downstream_lineage(
         target_db = record.get("target_database")
         target_schema = record.get("target_schema")
         target_table = record.get("target_table")
+        
+        # Skip if target_table is None (can't recurse on None table)
+        if not target_table:
+            continue
         
         # Create a key for this target table
         target_table_key = (

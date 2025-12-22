@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, ForeignKey, Integer, BigInteger
+from sqlalchemy import Column, String, DateTime, Text, Boolean, ForeignKey, Integer, BigInteger, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -456,6 +456,47 @@ class FilterClauseColumnLineage(Base):
     # Relationships
     organization = relationship("Organization", foreign_keys=[org_id], backref="filter_clause_column_org_id")
     connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="filter_clause_column_conn_id")
+
+
+class TableMetadata(Base):
+    """
+    Metadata for tables in the data catalog.
+    Stores table descriptions, column descriptions, owners, and other metadata.
+    """
+    __tablename__ = "table_metadata"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    
+    # Table identifier - stored as: database/schema/table_name or schema/table_name or table_name
+    table_id = Column(String(500), nullable=False, index=True)
+    
+    # Individual components for easier querying
+    database = Column(String(200), nullable=True, index=True)
+    schema = Column(String(200), nullable=True, index=True)
+    table_name = Column(String(200), nullable=False, index=True)
+    
+    # Metadata fields
+    description = Column(Text, nullable=True)  # Table description
+    owner = Column(String(200), nullable=True)  # Table owner
+    tags = Column(JSONB, nullable=True)  # Array of tags for categorization
+    column_descriptions = Column(JSONB, nullable=True)  # Dictionary: {column_name: description}
+    
+    # Audit fields
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[org_id], backref="table_metadata_org_id")
+    creator = relationship("User", foreign_keys=[created_by], backref="table_metadata_created")
+    updater = relationship("User", foreign_keys=[updated_by], backref="table_metadata_updated")
+    
+    # Unique constraint: one metadata record per table per org
+    __table_args__ = (
+        UniqueConstraint('org_id', 'table_id', name='uq_table_metadata_org_table'),
+    )
 
 
 class LineageLoadWatermark(Base):
