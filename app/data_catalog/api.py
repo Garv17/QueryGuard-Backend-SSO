@@ -14,7 +14,6 @@ from app.data_catalog.service import (
     get_table_detail,
     get_table_lineage,
     create_or_update_table_metadata,
-    get_table_metadata,
     delete_table_metadata,
     build_table_id,
     parse_table_id
@@ -59,7 +58,7 @@ def search_tables_endpoint(
 
 
 # IMPORTANT: More specific routes must come BEFORE less specific ones
-# Otherwise FastAPI will match /lineage as part of table_id
+# Otherwise FastAPI will match /lineage or /metadata as part of table_id
 
 @router.get("/tables/{table_id:path}/lineage", response_model=LineageGraphResponse)
 def get_table_lineage_endpoint(
@@ -101,18 +100,17 @@ def get_table_lineage_endpoint(
         raise HTTPException(status_code=500, detail=f"Error fetching lineage: {str(e)}")
 
 
-@router.get("/tables/{table_id:path}", response_model=TableDetailResponse)
-def get_table_detail_endpoint(
+@router.get("/tables/{table_id:path}/metadata", response_model=TableDetailResponse)
+def get_table_metadata_endpoint(
     table_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Get detailed information about a specific table.
-    Includes metadata, columns, and basic information.
+    Get detailed information about a specific table including metadata, columns, and basic information.
+    Returns the same response as the table detail endpoint.
     
     Note: table_id can contain slashes (e.g., "database/schema/table_name")
-    Use {table_id:path} to allow slashes in the path parameter.
     """
     try:
         # URL decode the table_id in case it was double-encoded
@@ -190,44 +188,6 @@ def create_or_update_table_metadata_endpoint(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error saving metadata: {str(e)}")
-
-
-@router.get("/tables/{table_id:path}/metadata")
-def get_table_metadata_endpoint(
-    table_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Get table metadata only (without full table details).
-    """
-    try:
-        # URL decode the table_id in case it was double-encoded
-        from urllib.parse import unquote
-        table_id = unquote(table_id)
-        
-        metadata = get_table_metadata(
-            db=db,
-            org_id=current_user.org_id,
-            table_id=table_id
-        )
-        
-        if not metadata:
-            raise HTTPException(status_code=404, detail=f"Metadata not found for table: {table_id}")
-        
-        return {
-            "table_id": metadata.table_id,
-            "description": metadata.description,
-            "owner": metadata.owner,
-            "tags": metadata.tags,
-            "column_descriptions": metadata.column_descriptions,
-            "created_at": metadata.created_at.isoformat() if metadata.created_at else None,
-            "updated_at": metadata.updated_at.isoformat() if metadata.updated_at else None
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching metadata: {str(e)}")
 
 
 @router.delete("/tables/{table_id:path}/metadata")
