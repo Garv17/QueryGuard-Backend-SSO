@@ -1002,39 +1002,45 @@ def get_query_history_search_for_org(
     if affected_query_ids:
         regression_queries = fetch_queries(affected_query_ids)
     
-    # Format the response - keep it concise and clear for the agent
+    # Format the response - make it very clear and structured for the agent
     response_parts = []
     
     if impact_report:
         # Truncate impact report if too long to prevent agent confusion
         report_text = impact_report[:1000] + "..." if len(impact_report) > 1000 else impact_report
-        response_parts.append("Impact Analysis: " + report_text)
+        response_parts.append("=== IMPACT ANALYSIS ===")
+        response_parts.append(report_text)
+        response_parts.append("")  # Empty line for readability
     
     if regression_queries:
-        response_parts.append(f"Found {len(affected_query_ids)} impacted queries:")
+        response_parts.append(f"=== IMPACTED QUERIES ({len(affected_query_ids)} total) ===")
         for idx, query_info in enumerate(regression_queries[:10], 1):  # Limit to first 10 for brevity
             query_id = query_info.get("query_id", "Unknown")
             query_text = query_info.get("query_text", "")
             # Clean up query text - remove extra whitespace and newlines
             query_text = " ".join(query_text.split())[:200] + "..." if len(query_text) > 200 else " ".join(query_text.split())
-            response_parts.append(f"{idx}. Query ID: {query_id}\n   Preview: {query_text}")
+            response_parts.append(f"{idx}. Query ID: {query_id}")
+            response_parts.append(f"   SQL Preview: {query_text}")
+            response_parts.append("")  # Empty line between queries
         
         if len(regression_queries) > 10:
             response_parts.append(f"... and {len(regression_queries) - 10} more queries")
     elif affected_query_ids:
         # If we have IDs but couldn't fetch queries, just report the count
-        response_parts.append(f"Found {len(affected_query_ids)} impacted query IDs: {', '.join(affected_query_ids[:5])}")
-        if len(affected_query_ids) > 5:
-            response_parts.append(f"(and {len(affected_query_ids) - 5} more)")
+        response_parts.append(f"=== IMPACTED QUERY IDs ({len(affected_query_ids)} total) ===")
+        response_parts.append(", ".join(affected_query_ids[:10]))
+        if len(affected_query_ids) > 10:
+            response_parts.append(f"... and {len(affected_query_ids) - 10} more")
     else:
+        response_parts.append("=== NO IMPACTED QUERIES FOUND ===")
         response_parts.append("No impacted queries found in query history.")
     
-    # Return a clean, concise response
+    # Return a clean, structured response
     result = "\n".join(response_parts) if response_parts else "No impact analysis results found."
     
-    # Ensure response is not too long (max 2000 chars to prevent agent confusion)
-    if len(result) > 2000:
-        result = result[:1900] + "\n... (response truncated)"
+    # Ensure response is not too long (max 3000 chars to allow for more queries)
+    if len(result) > 3000:
+        result = result[:2900] + "\n... (response truncated due to length)"
     
     return result
 
@@ -1052,8 +1058,8 @@ def build_org_query_history_tool(org_id: str, max_iters: Optional[int] = 5) -> T
         func=_fn,
         description=(
             "Analyze schema/SQL changes and find impacted queries. Input is a natural-language description of a change "
-            "(e.g., 'I am going to remove column X from table Y'). ALWAYS return a numbered list with each item's "
-            "query_id and a short SQL preview (first ~200 chars)."
+            "(e.g., 'I am going to remove column X from table Y'). Returns a formatted list with Query IDs and SQL previews. "
+            "IMPORTANT: The agent MUST include the complete tool output in the final answer, not a summary."
         ),
     )
 
