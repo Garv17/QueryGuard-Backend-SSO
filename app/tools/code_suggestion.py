@@ -1521,10 +1521,11 @@ def build_org_code_suggestion_tool(org_id: str) -> Tool:
         name="code_suggestion",
         func=_fn,
         description=(
-            "Analyze PR impact reports OR user-described changes and suggest code changes to mitigate impacts. "
-            "Input can be either: (1) repo name and PR number (e.g., 'suggest code changes for PR 63 in owner/repo'), "
-            "OR (2) a description of changes you're making (e.g., 'I am dropping column X from table Y'). "
-            "Returns specific code suggestions based on impact analysis."
+            "Analyze PR impact reports and suggest code changes to mitigate impacts. "
+            "IMPORTANT: This tool automatically fetches PR analysis internally - you do NOT need to call pr_repo_analysis first. "
+            "Input format: repo name and PR number (e.g., 'PR 95 in Intellytics-Solutions/github-app-poc' or 'suggest code changes for PR 63 in owner/repo'). "
+            "Alternatively, you can provide a description of changes (e.g., 'I am dropping column X from table Y'). "
+            "Returns specific SQL code suggestions with old_code and new_code to fix impacted queries and downstream dependencies."
         ),
     )
 
