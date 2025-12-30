@@ -429,6 +429,8 @@ async def chat_with_llm(
             agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             verbose=True,
             handle_parsing_errors=True,
+            max_iterations=10,  # Limit iterations to prevent infinite loops
+            max_execution_time=120,  # 2 minutes max execution time
         )
 
         # Strong guidance to the agent on tool selection and output format
@@ -448,14 +450,17 @@ async def chat_with_llm(
             "BEHAVIOR:\n"
             "- Be concise and helpful.\n"
             f"{conversation_note}"
+            "- CRITICAL: After a tool returns results, you MUST provide the final answer immediately. DO NOT call the same tool again or loop.\n"
+            "- CRITICAL: When a tool returns impacted queries or data, format it nicely for the user and STOP. Do not try to process it further or call additional tools unless explicitly needed.\n"
             "- If the user greets you (e.g., 'hi', 'hello'), respond with a short intro of who you are and how you can help (lineage Q&A, query impact analysis, PR analysis, code suggestions, and Jira ticket creation).\n"
-            "- If the question is about schema/column changes or 'impacted queries', you MUST use the query_history_search tool.\n"
+            "- If the question is about schema/column changes or 'impacted queries', you MUST use the query_history_search tool ONCE, then format and return the results.\n"
             "- When reporting impacted queries, return a concise, numbered list with a short SQL preview for each query, not just IDs.\n"
-            "- If it's a pure lineage question, use the extract_lineage tool.\n"
+            "- If it's a pure lineage question, use the extract_lineage tool ONCE, then return the answer.\n"
             "- If the question is about PR analysis or repository information, use the pr_repo_analysis tool.\n"
             "- If the question asks for code suggestions, fixes, or changes needed based on PR analysis, use the code_suggestion tool.\n"
             "- If the question asks to create a Jira ticket, use the create_jira_ticket tool.\n"
-            "- ALWAYS honor prior conversation context (including repo/PR selections, confirmations, and disambiguations) when invoking any tool. Do not ask the user to repeat details that were already confirmed."
+            "- ALWAYS honor prior conversation context (including repo/PR selections, confirmations, and disambiguations) when invoking any tool. Do not ask the user to repeat details that were already confirmed.\n"
+            "- IMPORTANT: Follow the ReAct format strictly. After each tool call, provide your final answer using 'Final Answer:' - do not continue thinking or calling more tools unless absolutely necessary."
         )
         # Nudge the agent to preferred tool if classification is specific
         preferred_hint = (
@@ -497,6 +502,36 @@ async def chat_with_llm(
                     logger.error(f"Agent parsing error: {error_msg}")
             else:
                 raise
+        except Exception as e:
+            # Handle iteration/time limit errors and other agent errors
+            error_msg = str(e)
+            logger.error(f"Agent execution error: {error_msg}")
+            
+            # Check for iteration/time limit errors
+            if "iteration limit" in error_msg.lower() or "time limit" in error_msg.lower() or "stopped due to" in error_msg.lower():
+                # Try to extract any partial response from the error
+                import re
+                # Look for any response content in the error
+                response_match = re.search(r'(?:output|response|answer)[:\s]+(.*?)(?:\n|$)', error_msg, re.DOTALL | re.IGNORECASE)
+                if response_match:
+                    partial_response = response_match.group(1).strip()
+                    if len(partial_response) > 50:  # Only use if substantial
+                        response_text = f"{partial_response}\n\n[Note: Response was truncated due to processing limits. The information above should address your query.]"
+                    else:
+                        response_text = "I've reached the processing limit while analyzing your query. The tool has retrieved the impacted queries, but I wasn't able to format the complete response. Here's what was found:\n\nPlease try rephrasing your question or breaking it into smaller parts."
+                else:
+                    # Check if we can extract query IDs from the error message
+                    query_ids = re.findall(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", error_msg, re.I)
+                    if query_ids:
+                        response_text = f"I found {len(query_ids)} impacted query(s) but encountered a processing limit. Query IDs: {', '.join(query_ids[:5])}"
+                        if len(query_ids) > 5:
+                            response_text += f" (and {len(query_ids) - 5} more)"
+                    else:
+                        response_text = "I've reached the processing limit while analyzing your query. Please try rephrasing your question or breaking it into smaller parts."
+            else:
+                # For other errors, provide a generic message
+                response_text = "I encountered an error while processing your request. Please try rephrasing your question."
+                logger.error(f"Unexpected agent error: {error_msg}")
 
         # Best-effort: extract query IDs from the response text and fetch full queries
         impacted_query_ids: List[str] = []
@@ -1644,6 +1679,8 @@ Make the title specific and actionable. Make the description comprehensive and i
                         agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
                         verbose=True,
                         handle_parsing_errors=True,
+                        max_iterations=10,  # Limit iterations to prevent infinite loops
+                        max_execution_time=120,  # 2 minutes max execution time
                     )
 
                     # Strong guidance to the agent on tool selection and output format
@@ -1663,22 +1700,24 @@ Make the title specific and actionable. Make the description comprehensive and i
                         "BEHAVIOR:\n"
                         "- Be concise and helpful.\n"
                         f"{conversation_note}"
+                        "- CRITICAL: After a tool returns results, you MUST provide the final answer immediately. DO NOT call the same tool again or loop.\n"
+                        "- CRITICAL: When a tool returns impacted queries or data, format it nicely for the user and STOP. Do not try to process it further or call additional tools unless explicitly needed.\n"
                         "- CRITICAL: If a tool returns 'NO DATA FOUND' or indicates no data is available, you MUST tell the user that no data was found. DO NOT make up or assume information. For PR/Jira flows, immediately ask the user for the repository (owner/repo) and PR number so you can retry instead of ending the conversation.\n"
                         "- CRITICAL: If the create_jira_ticket tool returns 'JIRA CONNECTION NOT CONFIGURED' or 'JIRA ERROR', you MUST inform the user that Jira is not set up. DO NOT try other tools - this is a configuration issue, not a data issue.\n"
                         "- DO NOT hallucinate lineage relationships, impacted queries, or any data that isn't explicitly returned by the tools.\n"
                         "- DO NOT try alternative tools when a tool fails due to configuration issues (like missing Jira connection).\n"
                         "- If the user greets you (e.g., 'hi', 'hello'), respond with a short intro of who you are and how you can help (lineage Q&A, query impact analysis, PR analysis, code suggestions, and Jira ticket creation).\n"
-                        "- If the question is about schema/column changes or 'impacted queries', you MUST use the query_history_search tool.\n"
+                        "- If the question is about schema/column changes or 'impacted queries', you MUST use the query_history_search tool ONCE, then format and return the results.\n"
                         "- When reporting impacted queries, return a concise, numbered list with a short SQL preview for each query, not just IDs.\n"
-                        "- If it's a pure lineage question, use the extract_lineage tool.\n"
+                        "- If it's a pure lineage question, use the extract_lineage tool ONCE, then return the answer.\n"
                         "- If you already suggested a repo/PR and the user replies affirmatively (e.g., 'yes', 'that repo'), assume that repo/PR and proceed with create_jira_ticket instead of asking again.\n"
                         "- If you do NOT have repo/PR details, ask for them once (owner/repo and PR number) and wait; do not loop or re-ask in the same turn.\n"
-                        "- If the agent hits iteration or time limits, stop and respond with a concise ask for the missing repo/PR details instead of repeating prompts.\n"
                         "- If the question is about PR analysis or repository information, use the pr_repo_analysis tool.\n"
                         "- If the question asks for code suggestions, fixes, or changes needed based on PR analysis, use the code_suggestion tool.\n"
                         "- If the question asks to create a Jira ticket, use the create_jira_ticket tool.\n"
                         "- When tools return 'NO DATA FOUND', acknowledge this clearly to the user without making assumptions.\n"
                         "- When tools return configuration errors (like 'JIRA CONNECTION NOT CONFIGURED'), inform the user about the configuration issue and do NOT try other tools.\n"
+                        "- IMPORTANT: Follow the ReAct format strictly. After each tool call, provide your final answer using 'Final Answer:' - do not continue thinking or calling more tools unless absolutely necessary."
                     )
                     # Nudge the agent to preferred tool if classification is specific
                     preferred_hint = (
@@ -1720,6 +1759,36 @@ Make the title specific and actionable. Make the description comprehensive and i
                                 logger.error(f"Agent parsing error: {error_msg}")
                         else:
                             raise
+                    except Exception as e:
+                        # Handle iteration/time limit errors and other agent errors
+                        error_msg = str(e)
+                        logger.error(f"Agent execution error: {error_msg}")
+                        
+                        # Check for iteration/time limit errors
+                        if "iteration limit" in error_msg.lower() or "time limit" in error_msg.lower() or "stopped due to" in error_msg.lower():
+                            # Try to extract any partial response from the error
+                            import re
+                            # Look for any response content in the error
+                            response_match = re.search(r'(?:output|response|answer)[:\s]+(.*?)(?:\n|$)', error_msg, re.DOTALL | re.IGNORECASE)
+                            if response_match:
+                                partial_response = response_match.group(1).strip()
+                                if len(partial_response) > 50:  # Only use if substantial
+                                    response_text = f"{partial_response}\n\n[Note: Response was truncated due to processing limits. The information above should address your query.]"
+                                else:
+                                    response_text = "I've reached the processing limit while analyzing your query. The tool has retrieved the impacted queries, but I wasn't able to format the complete response. Here's what was found:\n\nPlease try rephrasing your question or breaking it into smaller parts."
+                            else:
+                                # Check if we can extract query IDs from the error message
+                                query_ids = re.findall(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", error_msg, re.I)
+                                if query_ids:
+                                    response_text = f"I found {len(query_ids)} impacted query(s) but encountered a processing limit. Query IDs: {', '.join(query_ids[:5])}"
+                                    if len(query_ids) > 5:
+                                        response_text += f" (and {len(query_ids) - 5} more)"
+                                else:
+                                    response_text = "I've reached the processing limit while analyzing your query. Please try rephrasing your question or breaking it into smaller parts."
+                        else:
+                            # For other errors, provide a generic message
+                            response_text = "I encountered an error while processing your request. Please try rephrasing your question."
+                            logger.error(f"Unexpected agent error: {error_msg}")
 
                     # Best-effort: extract query IDs from the response text and fetch full queries
                     impacted_query_ids: List[str] = []
