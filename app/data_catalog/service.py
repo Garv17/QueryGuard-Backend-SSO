@@ -3,9 +3,9 @@ Service layer for Data Catalog business logic
 """
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct, or_, and_
-from typing import List, Dict, Optional, Set, Tuple
+from typing import List, Dict, Optional, Set, Tuple, Any
 from uuid import UUID
-from app.utils.models import ColumnLevelLineage, TableMetadata
+from app.utils.models import ColumnLevelLineage, TableMetadata, SnowflakeConnection
 from app.data_catalog.models import (
     TableSearchResult,
     TableDetailResponse,
@@ -50,7 +50,13 @@ def search_tables(
     org_id: UUID,
     search_query: Optional[str] = None,
     limit: int = 50,
-    offset: int = 0
+    offset: int = 0,
+    connection_id: Optional[UUID] = None,
+    database: Optional[str] = None,
+    schema: Optional[str] = None,
+    owner: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    has_metadata: Optional[bool] = None
 ) -> Tuple[List[TableSearchResult], int]:
     """
     Search for tables in the lineage data.
@@ -62,6 +68,12 @@ def search_tables(
         search_query: Optional search query (fuzzy match on table name, schema, database)
         limit: Maximum number of results
         offset: Offset for pagination
+        connection_id: Filter by Snowflake connection ID
+        database: Filter by database name
+        schema: Filter by schema name
+        owner: Filter by table owner (from metadata)
+        tags: Filter by tags (list of tags - table must have at least one)
+        has_metadata: Filter tables with/without metadata (True/False)
         
     Returns:
         Tuple of (list of TableSearchResult, total count)
@@ -94,6 +106,29 @@ def search_tables(
         ColumnLevelLineage.target_table.isnot(None),
         ColumnLevelLineage.target_table != ""
     )
+    
+    # Apply connection_id filter
+    if connection_id:
+        source_query = source_query.filter(ColumnLevelLineage.connection_id == connection_id)
+        target_query = target_query.filter(ColumnLevelLineage.connection_id == connection_id)
+    
+    # Apply database filter
+    if database:
+        source_query = source_query.filter(
+            func.lower(ColumnLevelLineage.source_database) == func.lower(database)
+        )
+        target_query = target_query.filter(
+            func.lower(ColumnLevelLineage.target_database) == func.lower(database)
+        )
+    
+    # Apply schema filter
+    if schema:
+        source_query = source_query.filter(
+            func.lower(ColumnLevelLineage.source_schema) == func.lower(schema)
+        )
+        target_query = target_query.filter(
+            func.lower(ColumnLevelLineage.target_schema) == func.lower(schema)
+        )
     
     # Apply search filter if provided
     if search_query:
@@ -152,15 +187,46 @@ def search_tables(
     table_ids = list(table_map.keys())
     metadata_map = _fetch_metadata_batch(db, org_id, table_ids)
     
-    # Merge metadata into results
+    # Merge metadata into results and apply metadata-based filters
+    filtered_table_map: Dict[str, TableSearchResult] = {}
+    
     for table_id, table_result in table_map.items():
-        if table_id in metadata_map:
-            metadata = metadata_map[table_id]
+        metadata = metadata_map.get(table_id)
+        
+        # Apply has_metadata filter
+        if has_metadata is not None:
+            has_meta = metadata is not None
+            if has_metadata != has_meta:
+                continue
+        
+        # Merge metadata into result
+        if metadata:
             table_result.description = metadata.get('description')
             table_result.owner = metadata.get('owner')
+            table_result.tags = metadata.get('tags')
+        
+        # Apply owner filter
+        if owner:
+            if not table_result.owner or table_result.owner.lower() != owner.lower():
+                continue
+        
+        # Apply tags filter
+        if tags:
+            if not metadata or not metadata.get('tags'):
+                continue
+            table_tags = metadata.get('tags', [])
+            if not isinstance(table_tags, list):
+                continue
+            # Check if table has at least one of the requested tags
+            table_tags_lower = [str(tag).lower() for tag in table_tags]
+            requested_tags_lower = [str(tag).lower() for tag in tags]
+            if not any(tag in table_tags_lower for tag in requested_tags_lower):
+                continue
+        
+        filtered_table_map[table_id] = table_result
     
     # Convert to list and sort by table_name
-    results = sorted(table_map.values(), key=lambda x: x.table_name.lower())
+    results = sorted(filtered_table_map.values(), key=lambda x: x.table_name.lower())
     
     # Apply pagination
     total = len(results)
@@ -633,4 +699,192 @@ def delete_table_metadata(
     db.delete(metadata)
     db.commit()
     return True
+
+
+def get_connections_for_org(
+    db: Session,
+    org_id: UUID
+) -> List[Dict[str, Any]]:
+    """
+    Get list of unique connections that have tables in the lineage data.
+    Returns both connection ID and name.
+    
+    Returns:
+        List of dicts with 'id' and 'name' keys
+    """
+    # Get distinct connection IDs from lineage data
+    connection_ids = db.query(
+        distinct(ColumnLevelLineage.connection_id)
+    ).filter(
+        ColumnLevelLineage.org_id == org_id,
+        ColumnLevelLineage.is_active == 1
+    ).all()
+    
+    connection_ids_list = [conn[0] for conn in connection_ids if conn[0]]
+    
+    if not connection_ids_list:
+        return []
+    
+    # Fetch connection names from SnowflakeConnection table
+    connections = db.query(
+        SnowflakeConnection.id,
+        SnowflakeConnection.connection_name
+    ).filter(
+        SnowflakeConnection.id.in_(connection_ids_list),
+        SnowflakeConnection.org_id == org_id,
+        SnowflakeConnection.is_active == True
+    ).all()
+    
+    # Return list of dicts with id and name
+    return [
+        {
+            'id': str(conn.id),
+            'name': conn.connection_name
+        }
+        for conn in connections
+    ]
+
+
+def get_databases_for_connection(
+    db: Session,
+    org_id: UUID,
+    connection_id: UUID
+) -> List[str]:
+    """
+    Get list of unique database names for a given connection.
+    Searches both source and target tables.
+    
+    Returns:
+        List of database names (sorted)
+    """
+    # Get databases from source tables
+    source_dbs = db.query(
+        distinct(ColumnLevelLineage.source_database)
+    ).filter(
+        ColumnLevelLineage.org_id == org_id,
+        ColumnLevelLineage.is_active == 1,
+        ColumnLevelLineage.connection_id == connection_id,
+        ColumnLevelLineage.source_database.isnot(None),
+        ColumnLevelLineage.source_database != ""
+    ).all()
+    
+    # Get databases from target tables
+    target_dbs = db.query(
+        distinct(ColumnLevelLineage.target_database)
+    ).filter(
+        ColumnLevelLineage.org_id == org_id,
+        ColumnLevelLineage.is_active == 1,
+        ColumnLevelLineage.connection_id == connection_id,
+        ColumnLevelLineage.target_database.isnot(None),
+        ColumnLevelLineage.target_database != ""
+    ).all()
+    
+    # Combine and deduplicate
+    db_set = set()
+    for db_row in source_dbs:
+        if db_row[0]:
+            db_set.add(db_row[0])
+    for db_row in target_dbs:
+        if db_row[0]:
+            db_set.add(db_row[0])
+    
+    return sorted(list(db_set))
+
+
+def get_schemas_for_connection_database(
+    db: Session,
+    org_id: UUID,
+    connection_id: UUID,
+    database: str
+) -> List[str]:
+    """
+    Get list of unique schema names for a given connection and database.
+    Searches both source and target tables.
+    
+    Returns:
+        List of schema names (sorted)
+    """
+    # Get schemas from source tables
+    source_schemas = db.query(
+        distinct(ColumnLevelLineage.source_schema)
+    ).filter(
+        ColumnLevelLineage.org_id == org_id,
+        ColumnLevelLineage.is_active == 1,
+        ColumnLevelLineage.connection_id == connection_id,
+        func.lower(ColumnLevelLineage.source_database) == func.lower(database),
+        ColumnLevelLineage.source_schema.isnot(None),
+        ColumnLevelLineage.source_schema != ""
+    ).all()
+    
+    # Get schemas from target tables
+    target_schemas = db.query(
+        distinct(ColumnLevelLineage.target_schema)
+    ).filter(
+        ColumnLevelLineage.org_id == org_id,
+        ColumnLevelLineage.is_active == 1,
+        ColumnLevelLineage.connection_id == connection_id,
+        func.lower(ColumnLevelLineage.target_database) == func.lower(database),
+        ColumnLevelLineage.target_schema.isnot(None),
+        ColumnLevelLineage.target_schema != ""
+    ).all()
+    
+    # Combine and deduplicate
+    schema_set = set()
+    for schema_row in source_schemas:
+        if schema_row[0]:
+            schema_set.add(schema_row[0])
+    for schema_row in target_schemas:
+        if schema_row[0]:
+            schema_set.add(schema_row[0])
+    
+    return sorted(list(schema_set))
+
+
+def get_owners_for_org(
+    db: Session,
+    org_id: UUID
+) -> List[str]:
+    """
+    Get list of unique owners from table metadata.
+    
+    Returns:
+        List of owner names (sorted)
+    """
+    owners = db.query(
+        distinct(TableMetadata.owner)
+    ).filter(
+        TableMetadata.org_id == org_id,
+        TableMetadata.owner.isnot(None),
+        TableMetadata.owner != ""
+    ).all()
+    
+    return sorted([owner[0] for owner in owners if owner[0]])
+
+
+def get_tags_for_org(
+    db: Session,
+    org_id: UUID
+) -> List[str]:
+    """
+    Get list of unique tags from table metadata.
+    Tags are stored as JSONB arrays.
+    
+    Returns:
+        List of unique tag names (sorted)
+    """
+    # Query all metadata records with tags
+    metadata_records = db.query(TableMetadata.tags).filter(
+        TableMetadata.org_id == org_id,
+        TableMetadata.tags.isnot(None)
+    ).all()
+    
+    # Collect all tags
+    tag_set = set()
+    for record in metadata_records:
+        if record.tags and isinstance(record.tags, list):
+            for tag in record.tags:
+                if tag:
+                    tag_set.add(str(tag))
+    
+    return sorted(list(tag_set))
 

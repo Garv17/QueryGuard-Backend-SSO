@@ -24,6 +24,7 @@ class TableSearchResult(BaseModel):
     # Metadata (will be populated from metadata table if available)
     description: Optional[str] = None
     owner: Optional[str] = None
+    tags: Optional[List[str]] = None  # Tags from metadata
     column_count: Optional[int] = None  # Number of columns found in lineage
 
 

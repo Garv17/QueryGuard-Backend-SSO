@@ -3,7 +3,7 @@ Data Catalog API endpoints
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 
 from app.database import get_db
@@ -16,7 +16,12 @@ from app.data_catalog.service import (
     create_or_update_table_metadata,
     delete_table_metadata,
     build_table_id,
-    parse_table_id
+    parse_table_id,
+    get_connections_for_org,
+    get_databases_for_connection,
+    get_schemas_for_connection_database,
+    get_owners_for_org,
+    get_tags_for_org
 )
 from app.data_catalog.models import (
     TableSearchResponse,
@@ -33,20 +38,42 @@ def search_tables_endpoint(
     q: Optional[str] = Query(None, description="Search query (searches table name, schema, database)"),
     limit: int = Query(50, ge=1, le=100, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
+    connection_id: Optional[UUID] = Query(None, description="Filter by Snowflake connection ID"),
+    database: Optional[str] = Query(None, description="Filter by database name"),
+    schema: Optional[str] = Query(None, description="Filter by schema name"),
+    owner: Optional[str] = Query(None, description="Filter by table owner"),
+    tags: Optional[str] = Query(None, description="Filter by tags (comma-separated)"),
+    has_metadata: Optional[bool] = Query(None, description="Filter tables with/without metadata"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Search for tables in the data catalog.
     Searches through all tables present in the lineage data.
+    
+    Supports advanced filtering:
+    - Filter by connection_id, then database, then schema (hierarchical)
+    - Filter by owner and tags (from metadata)
+    - Filter by has_metadata (True/False)
     """
     try:
+        # Parse tags from comma-separated string
+        tags_list = None
+        if tags:
+            tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+        
         results, total = search_tables(
             db=db,
             org_id=current_user.org_id,
             search_query=q,
             limit=limit,
-            offset=offset
+            offset=offset,
+            connection_id=connection_id,
+            database=database,
+            schema=schema,
+            owner=owner,
+            tags=tags_list,
+            has_metadata=has_metadata
         )
         
         return TableSearchResponse(
@@ -218,4 +245,110 @@ def delete_table_metadata_endpoint(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting metadata: {str(e)}")
+
+
+# Filter helper endpoints for hierarchical filtering
+
+@router.get("/filters/connections")
+def get_connections_endpoint(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get list of connections (with ID and name) that have tables in the lineage data.
+    Used for hierarchical filtering: connection → database → schema
+    
+    Returns:
+        {
+            "connections": [
+                {"id": "uuid", "name": "connection_name"},
+                ...
+            ]
+        }
+    """
+    try:
+        connections = get_connections_for_org(db=db, org_id=current_user.org_id)
+        return {"connections": connections}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching connections: {str(e)}")
+
+
+@router.get("/filters/connections/{connection_id}/databases")
+def get_databases_endpoint(
+    connection_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get list of database names for a given connection.
+    Used for hierarchical filtering after selecting a connection.
+    """
+    try:
+        databases = get_databases_for_connection(
+            db=db,
+            org_id=current_user.org_id,
+            connection_id=connection_id
+        )
+        return {"databases": databases}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching databases: {str(e)}")
+
+
+@router.get("/filters/connections/{connection_id}/databases/{database}/schemas")
+def get_schemas_endpoint(
+    connection_id: UUID,
+    database: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get list of schema names for a given connection and database.
+    Used for hierarchical filtering after selecting a connection and database.
+    """
+    try:
+        # URL decode the database name in case it was encoded
+        from urllib.parse import unquote
+        database = unquote(database)
+        
+        schemas = get_schemas_for_connection_database(
+            db=db,
+            org_id=current_user.org_id,
+            connection_id=connection_id,
+            database=database
+        )
+        return {"schemas": schemas}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching schemas: {str(e)}")
+
+
+@router.get("/filters/owners")
+def get_owners_endpoint(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get list of unique owners from table metadata.
+    Used for filtering tables by owner.
+    """
+    try:
+        owners = get_owners_for_org(db=db, org_id=current_user.org_id)
+        return {"owners": owners}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching owners: {str(e)}")
+
+
+@router.get("/filters/tags")
+def get_tags_endpoint(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get list of unique tags from table metadata.
+    Used for filtering tables by tags.
+    """
+    try:
+        tags = get_tags_for_org(db=db, org_id=current_user.org_id)
+        return {"tags": tags}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching tags: {str(e)}")
 
