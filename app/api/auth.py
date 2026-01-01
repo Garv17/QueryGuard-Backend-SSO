@@ -62,6 +62,8 @@ class UserResponse(BaseModel):
     email: str
     org_id: UUID
     role: str
+    is_connection_setup: bool
+    missing_connectors: List[str]
 
     class Config:
         from_attributes = True
@@ -395,6 +397,59 @@ def change_password(
 
 
 @router.get("/me", response_model=UserResponse)
-def me(current_user: User = Depends(get_current_user), request: Request = None):
+def me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
     logger.debug("GET /auth/me - user_id=%s ip=%s", current_user.id, request.client.host if request and request.client else "unknown")
-    return current_user
+    
+    # Check connection setup status for admin users
+    is_connection_setup = True
+    missing_connectors = []
+    
+    # Only check for users with admin-level access (can manage connectors)
+    if has_any_role(current_user, [PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, ORGANIZATION_ADMIN]):
+        # Get organization
+        organization = db.query(Organization).filter(Organization.id == current_user.org_id).first()
+        
+        if organization:
+            # If flag is already True, skip checking (optimization)
+            if not organization.is_connection_setup:
+                # Check connector setup status
+                connectors_status = check_connector_setup_status(current_user.org_id, db)
+                
+                # ===== CONNECTION SETUP LOGIC =====
+                # To switch back to checking ALL connectors, uncomment the block below
+                # and comment out the "REQUIRED CONNECTORS" block
+                
+                # OPTION 1: Check if ALL connectors are set up (previous logic)
+                # all_setup = all(connectors_status.values())
+                # is_connection_setup = all_setup
+                # log_msg = "all connectors" if all_setup else "missing connectors"
+                
+                # OPTION 2: Check if REQUIRED connectors (snowflake AND github) are set up (current logic)
+                snowflake_setup = connectors_status.get("snowflake", False)
+                github_setup = connectors_status.get("github", False)
+                is_connection_setup = snowflake_setup and github_setup
+                log_msg = "required connectors (snowflake & github)" if is_connection_setup else "missing connectors"
+                
+                if is_connection_setup:
+                    # Update the flag to True
+                    organization.is_connection_setup = True
+                    logger.info("/auth/me - %s set up for org_id=%s, flag updated", log_msg, current_user.org_id)
+                else:
+                    missing_connectors = get_missing_connectors(connectors_status)
+                    logger.info("/auth/me - missing connectors for org_id=%s: %s", current_user.org_id, missing_connectors)
+            else:
+                # Flag is already True, so connection setup is complete
+                is_connection_setup = True
+                logger.debug("/auth/me - connection setup already complete for org_id=%s", current_user.org_id)
+    
+    db.commit()
+    
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "org_id": current_user.org_id,
+        "role": current_user.role,
+        "is_connection_setup": is_connection_setup,
+        "missing_connectors": missing_connectors
+    }
