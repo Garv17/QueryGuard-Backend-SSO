@@ -253,7 +253,7 @@ def validate_cron_expression(cron_expr: Optional[str]) -> bool:
         logger.warning("Invalid cron expression '%s': %s", cron_expr, str(e))
         return False
 
-def test_connection(account, username, password, warehouse=None, database=None, schema=None):
+def test_connection(account, username, password, warehouse=None, database=None, schema=None, role=None):
     try:
         conn = snowflake.connector.connect(
             user=username,
@@ -261,14 +261,88 @@ def test_connection(account, username, password, warehouse=None, database=None, 
             account=account,
             warehouse=warehouse,
             database=database,
-            schema=schema
+            schema=schema,
+            role=role
         )
+        
+        # Test that the role and warehouse are valid by executing queries
+        # This will fail if the role/warehouse is invalid or doesn't have necessary permissions
+        cur = conn.cursor()
+        try:
+            # Check current warehouse to verify it's set correctly
+            if warehouse and warehouse.strip():
+                cur.execute("SELECT CURRENT_WAREHOUSE()")
+                current_warehouse = cur.fetchone()[0]
+                
+                if current_warehouse is None:
+                    cur.close()
+                    conn.close()
+                    logger.warning("/snowflake/test-connection - warehouse not set: expected=%s", warehouse)
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Warehouse validation failed: Warehouse '{warehouse}' was not set. Please check if the warehouse name is correct and the user has permission to use it."
+                    )
+                
+                if current_warehouse.upper() != warehouse.upper():
+                    cur.close()
+                    conn.close()
+                    logger.warning("/snowflake/test-connection - warehouse mismatch: expected=%s, got=%s", warehouse, current_warehouse)
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Warehouse validation failed: Expected warehouse '{warehouse}' but got '{current_warehouse}'. Please check if the warehouse name is correct and the user has permission to use it."
+                    )
+            
+            # Check current role to verify it's set correctly
+            cur.execute("SELECT CURRENT_ROLE()")
+            current_role = cur.fetchone()[0]
+            
+            # If a role was specified, verify it matches what we got back
+            if role and role.strip():
+                if current_role.upper() != role.upper():
+                    cur.close()
+                    conn.close()
+                    logger.warning("/snowflake/test-connection - role mismatch: expected=%s, got=%s", role, current_role)
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Role validation failed: Expected role '{role}' but got '{current_role}'. Please check if the role name is correct and the user has permission to use it."
+                    )
+            
+            # Test basic query execution to ensure role and warehouse have necessary permissions
+            cur.execute("SHOW DATABASES")
+            cur.fetchall()  # Consume the result
+            
+            logger.info("/snowflake/test-connection - success for user=%s account=%s warehouse=%s role=%s", 
+                       username, account, warehouse or "default", role or "default")
+        finally:
+            cur.close()
+        
         conn.close()
-        logger.info("/snowflake/test-connection - success for user=%s account=%s", username, account)
         return True
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
-        logger.warning("/snowflake/test-connection - failed: %s", str(e))
-        raise HTTPException(status_code=400, detail=f"Connection failed: {str(e)}")
+        error_msg = str(e)
+        error_lower = error_msg.lower()
+        
+        # Check if it's a warehouse-related error
+        if "warehouse" in error_lower or ("does not exist" in error_lower and warehouse):
+            logger.warning("/snowflake/test-connection - warehouse validation failed: %s", error_msg)
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Warehouse validation failed: {error_msg}. Please verify that the warehouse '{warehouse}' exists and the user has permission to use it."
+            )
+        
+        # Check if it's a role-related error
+        if "role" in error_lower or ("does not exist" in error_lower and role) or "not authorized" in error_lower:
+            logger.warning("/snowflake/test-connection - role validation failed: %s", error_msg)
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Role validation failed: {error_msg}. Please verify that the role '{role}' exists and the user has permission to use it."
+            )
+        
+        logger.warning("/snowflake/test-connection - connection failed: %s", error_msg)
+        raise HTTPException(status_code=400, detail=f"Connection failed: {error_msg}")
 
 
 # --- Models ---
@@ -362,12 +436,13 @@ class DatabaseSchemaSelectionRequest(BaseModel):
 # --- Endpoints ---
 @router.post("/test-connection")
 def snowflake_test_connection(conn: SnowflakeConn, current_user: User = Depends(require_connector_access()), request: Request = None):
-    """Test Snowflake connection before saving"""
+    """Test Snowflake connection before saving, including role validation"""
     success = test_connection(
         account=conn.account,
         username=conn.username,
         password=conn.password,
-        warehouse=conn.warehouse
+        warehouse=conn.warehouse,
+        role=conn.role
     )
     return {"message": "Connection successful"} if success else {"message": "Connection failed"}
 
@@ -375,8 +450,8 @@ def snowflake_test_connection(conn: SnowflakeConn, current_user: User = Depends(
 @router.post("/save-connection", response_model=ConnectionResponse, status_code=status.HTTP_201_CREATED)
 def save_connection(conn: SnowflakeConn, current_user: User = Depends(require_connector_access()), db: Session = Depends(get_db), request: Request = None):
     """Save Snowflake connection after successful test"""
-    # Test connection before saving
-    test_connection(conn.account, conn.username, conn.password, conn.warehouse)
+    # Test connection before saving, including role validation
+    test_connection(conn.account, conn.username, conn.password, conn.warehouse, role=conn.role)
 
     # Validate cron expression if provided
     if conn.cron_expression and conn.cron_expression.strip():
