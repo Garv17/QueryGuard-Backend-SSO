@@ -115,6 +115,48 @@ def get_jira_issue_types(server_url: str, username: str, api_token: str, project
         logger.warning("/jira/issue-types - request error: %s", str(e))
         raise HTTPException(status_code=400, detail=f"Failed to get issue types: {str(e)}")
 
+def get_jira_assignable_users(server_url: str, username: str, api_token: str, project_key: Optional[str] = None) -> List[dict]:
+    """Get assignable users for a Jira connection, optionally filtered by project"""
+    try:
+        server_url = server_url.rstrip('/')
+        auth = HTTPBasicAuth(username, api_token)
+        headers = {"Accept": "application/json"}
+        
+        # Build URL with optional project filter
+        if project_key:
+            url = f"{server_url}/rest/api/2/user/assignable/search?project={project_key}"
+        else:
+            # Get all assignable users (without project filter)
+            url = f"{server_url}/rest/api/2/user/assignable/search"
+        
+        response = requests.get(
+            url,
+            auth=auth,
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            users = response.json()
+            logger.info("/jira/users - fetched %d users", len(users))
+            return [
+                {
+                    "account_id": user.get("accountId", ""),
+                    "name": user.get("displayName", ""),
+                    "email": user.get("emailAddress", ""),
+                    "active": user.get("active", True)
+                }
+                for user in users
+            ]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to get users: {response.status_code} - {response.text}"
+            )
+    except requests.exceptions.RequestException as e:
+        logger.warning("/jira/users - request error: %s", str(e))
+        raise HTTPException(status_code=400, detail=f"Failed to get users: {str(e)}")
+
 def create_jira_issue(
     server_url: str, 
     username: str, 
@@ -150,7 +192,8 @@ def create_jira_issue(
             issue_data["fields"]["priority"] = {"name": priority}
         
         if assignee:
-            issue_data["fields"]["assignee"] = {"name": assignee}
+            # Use accountId for Jira Cloud (modern format)
+            issue_data["fields"]["assignee"] = {"accountId": assignee}
         
         response = requests.post(
             f"{server_url}/rest/api/2/issue",
@@ -184,16 +227,12 @@ class JiraConnectionRequest(BaseModel):
     server_url: HttpUrl
     username: str  # Email for Atlassian Cloud
     api_token: str
-    project_key: str
-    issue_type: str = "Task"
 
 class JiraConnectionResponse(BaseModel):
     id: UUID
     connection_name: str
     server_url: str
     username: str
-    project_key: str
-    issue_type: str
     is_active: bool
     created_at: datetime
 
@@ -202,11 +241,12 @@ class JiraConnectionResponse(BaseModel):
 
 class CreateTicketRequest(BaseModel):
     connection_id: str
+    project_key: str
     summary: str
     description: str
     issue_type: Optional[str] = None
     priority: Optional[str] = None
-    assignee: Optional[str] = None
+    assignee: Optional[str] = None  # account_id from /jira/users/{connection_id} endpoint
     pr_url: Optional[str] = None
     analysis_report_url: Optional[str] = None
 
@@ -236,6 +276,12 @@ class IssueTypeResponse(BaseModel):
     id: str
     name: str
     description: str
+
+class UserResponse(BaseModel):
+    account_id: str
+    name: str
+    email: str
+    active: bool
 
 
 # --- Endpoints ---
@@ -300,9 +346,7 @@ def save_connection(
         connection_name=conn.connection_name,
         server_url=str(conn.server_url),
         username=conn.username,
-        api_token=conn.api_token,
-        project_key=conn.project_key,
-        issue_type=conn.issue_type
+        api_token=conn.api_token
     )
     
     try:
@@ -404,6 +448,43 @@ def get_issue_types(
     return issue_types
 
 
+@router.get("/users/{connection_id}", response_model=List[UserResponse])
+def get_users(
+    connection_id: str,
+    project_key: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """Get assignable users for a Jira connection, optionally filtered by project"""
+    try:
+        conn_uuid = uuid.UUID(connection_id)
+    except ValueError:
+        logger.warning("/jira/users - invalid id %s", connection_id)
+        raise HTTPException(status_code=400, detail="Invalid connection ID format")
+
+    # Get connection details
+    connection = db.query(JiraConnection).filter(
+        JiraConnection.id == conn_uuid,
+        JiraConnection.org_id == current_user.org_id,
+        JiraConnection.is_active == True
+    ).first()
+    
+    if not connection:
+        logger.warning("/jira/users - connection not found %s", conn_uuid)
+        raise HTTPException(status_code=404, detail="Jira connection not found")
+
+    users = get_jira_assignable_users(
+        server_url=connection.server_url,
+        username=connection.username,
+        api_token=connection.api_token,
+        project_key=project_key
+    )
+    
+    logger.info("/jira/users - returning %d users", len(users))
+    return users
+
+
 @router.post("/create-ticket", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
 def create_ticket(
     ticket_request: CreateTicketRequest,
@@ -429,15 +510,15 @@ def create_ticket(
         logger.warning("/jira/create-ticket - connection not found %s", conn_uuid)
         raise HTTPException(status_code=404, detail="Jira connection not found")
 
-    # Use connection defaults if not provided
-    issue_type = ticket_request.issue_type or connection.issue_type
+    # Use request issue_type or default to "Task"
+    issue_type = ticket_request.issue_type or "Task"
     
     # Create the Jira issue
     issue_result = create_jira_issue(
         server_url=connection.server_url,
         username=connection.username,
         api_token=connection.api_token,
-        project_key=connection.project_key,
+        project_key=ticket_request.project_key,
         summary=ticket_request.summary,
         description=ticket_request.description,
         issue_type=issue_type,
