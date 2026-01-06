@@ -148,8 +148,8 @@ class JiraConnection(Base):
     server_url = Column(String(255), nullable=False)  # e.g., https://company.atlassian.net
     username = Column(String(100), nullable=False)  # Email for Atlassian Cloud
     api_token = Column(String(255), nullable=False)  # API token or password
-    project_key = Column(String(20), nullable=False)  # Default project key for tickets
-    issue_type = Column(String(50), default="Task")  # Default issue type
+    project_key = Column(String(20), nullable=True)  # Default project key for tickets
+    issue_type = Column(String(50), nullable=True, default="Task")  # Default issue type
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
