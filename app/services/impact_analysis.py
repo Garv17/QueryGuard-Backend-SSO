@@ -2,7 +2,6 @@ from typing import List, Dict, Any, Optional, Set
 from pydantic import BaseModel
 from langchain_community.document_loaders.csv_loader import CSVLoader
 from langchain_community.vectorstores import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.schema import Document
 from langchain.chains import RetrievalQA
 from datetime import datetime
@@ -14,6 +13,8 @@ import json
 import logging
 import re
 
+# Import embedding and LLM from vector_db to avoid duplication
+from app.vector_db import embedding, LLM
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -21,16 +22,11 @@ logger = logging.getLogger(__name__)
 
 VECTOR_STORE_DIR = os.getenv("VECTOR_STORE_DIR", "chroma_collection_setup")
 LINEAGE_CSV_PATH = os.getenv("LINEAGE_CSV_PATH", "temp_lineage_data/lineage_output_deep.csv")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
  
 # SQLAlchemy models for storing PR analysis in first-class tables
 from sqlalchemy.orm import Session
 from app.utils.models import GitHubPullRequestAnalysis, GitHubRepository, GitHubInstallation, DbtManifestNode
-
-
-embedding = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=GOOGLE_API_KEY)
-LLM = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=GOOGLE_API_KEY, temperature=0.2)
 
 
 def get_model_metadata(db: Session, file_path: str, org_id: str) -> Optional[Dict[str, Any]]:
@@ -104,6 +100,11 @@ def get_org_vector_store(org_id: str) -> Chroma:
     """
     Returns a Chroma vector store bound to a specific org collection.
     """
+    if embedding is None:
+        raise RuntimeError(
+            "OPENAI_API_KEY environment variable is not set. "
+            "Cannot initialize vector store without embedding model."
+        )
     collection_name = f"org_{org_id}"
     db = Chroma(
         collection_name=collection_name,
@@ -136,6 +137,11 @@ def get_retriever(org_id: str, k: int = 8):
 
 
 def get_qa_chain(org_id: str, k: int = 5):
+    if LLM is None:
+        raise RuntimeError(
+            "OPENAI_API_KEY environment variable is not set. "
+            "Cannot create QA chain without LLM."
+        )
     retriever = get_retriever(org_id, k=k)
     qa_chain = RetrievalQA.from_chain_type(
         llm=LLM,
