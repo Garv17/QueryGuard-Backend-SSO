@@ -295,14 +295,73 @@ VALIDATION FIRST:
 - DO NOT include other columns from the same target table (e.g., "accountfrom", "accountto") unless snippets explicitly show they also depend on the changed column
 
 Your task:
-- Traverse the lineage graph recursively (level by level) using the snippets.
-- Include ONLY downstream columns that have EXPLICIT dependencies on the changed column (or on depth 1 columns, etc.).
-- Group impacts by **depth level** (1-hop, 2-hop, 3-hop, etc.).
-- Collect impacted query IDs and metadata.
+- Build a dependency graph from the snippets, identifying the EXACT dependency chain
+- Traverse the lineage graph recursively (level by level) using the snippets
+- Include ONLY downstream columns that have EXPLICIT dependencies on the changed column (or on depth 1 columns, etc.)
+- Group impacts by **depth level** (1-hop, 2-hop, 3-hop, etc.) with STRICT depth classification
+- Collect impacted query IDs and metadata
+
+CRITICAL RULES FOR DEPTH CLASSIFICATION (READ CAREFULLY):
+
+**STEP 1: Identify the SOURCE column being changed**
+- The SOURCE column is: {source_column}
+- The SOURCE table is: {source_table}
+- This is your ROOT/SOURCE: {source_table}.{source_column}
+
+**STEP 2: Build Depth 1 (Direct Dependencies)**
+- Look through ALL snippets for relationships where: source_table = {source_table} AND source_column = {source_column}
+- ONLY include target columns where the snippet shows: {source_table}.{source_column} → target_table.target_column
+- These are Depth 1 columns
+- CRITICAL: If a snippet shows source_table = {source_table} and source_column = {source_column}, then the target is Depth 1
+- DO NOT include columns that depend on other columns - only those that directly depend on {source_table}.{source_column}
+- Example: If snippet shows "source_table: financial_activity_summary, source_column: accounting_period → target_table: gl_period_balances, target_column: accounting_period", then gl_period_balances.accounting_period is Depth 1
+
+**STEP 3: Build Depth 2 (Indirect Dependencies)**
+- First, identify all Depth 1 columns from Step 2
+- Then look through ALL snippets for relationships where the SOURCE is a Depth 1 column (NOT the original source)
+- ONLY include target columns where:
+  - The snippet shows: depth1_table.depth1_column → target_table.target_column
+  - AND the snippet does NOT show: {source_table}.{source_column} → target_table.target_column (if it does, it's Depth 1, not Depth 2)
+- CRITICAL: A column is Depth 2 ONLY if:
+  1. It depends on a Depth 1 column (as shown in snippets: depth1_table.depth1_column → this target)
+  2. It does NOT directly depend on {source_table}.{source_column} (no snippet shows {source_table}.{source_column} → this target)
+- Example: If snippets show:
+  - "source_table: financial_activity_summary, source_column: accounting_period → target_table: gl_period_balances, target_column: accounting_period" (Depth 1)
+  - "source_table: gl_period_balances, source_column: accounting_period → target_table: asset_period_financial_profile, target_column: accounting_period" (Depth 2)
+  - But NO snippet shows: "source_table: financial_activity_summary, source_column: accounting_period → target_table: asset_period_financial_profile, target_column: accounting_period"
+  Then asset_period_financial_profile.accounting_period is Depth 2, NOT Depth 1
+
+**STEP 4: Build Depth 3+ (Continue the pattern)**
+- Depth 3: Columns that depend on Depth 2 columns AND NOT on Depth 1 or source
+- Continue this pattern for deeper levels
+
+**VALIDATION CHECKLIST FOR EACH COLUMN:**
+Before placing a column in a depth level, verify:
+1. For Depth 1: Does a snippet show source_table={source_table} AND source_column={source_column} → this target? YES = Depth 1
+2. For Depth 2: Does a snippet show a Depth 1 column → this target? YES, and NO snippet shows {source_table}.{source_column} → this target? = Depth 2
+3. For Depth 3+: Does a snippet show a previous depth column → this target? YES, and no earlier depth dependency? = correct depth
+
+**EXAMPLES:**
+
+Example 1 - Correct Depth Classification:
+- Source: {source_table}.{source_column} (e.g., retail.raw.financial_activity_summary.accounting_period)
+- Snippet 1: "source_table: financial_activity_summary, source_column: accounting_period → target_table: gl_period_balances, target_column: accounting_period"
+  → gl_period_balances.accounting_period is Depth 1 ✓ (directly depends on source)
+- Snippet 2: "source_table: gl_period_balances, source_column: accounting_period → target_table: asset_period_financial_profile, target_column: accounting_period"
+  → asset_period_financial_profile.accounting_period is Depth 2 ✓ (depends on Depth 1, NOT directly on source)
+- Snippet 3: NO snippet shows "source_table: financial_activity_summary, source_column: accounting_period → target_table: asset_period_financial_profile"
+  → Confirms it's Depth 2, not Depth 1 ✓
+
+Example 2 - Wrong Classification (DO NOT DO THIS):
+- Source: {source_table}.{source_column}
+- Snippet 1: "source_table: financial_activity_summary, source_column: accounting_period → target_table: gl_period_balances, target_column: accounting_period"
+- Snippet 2: "source_table: gl_period_balances, source_column: accounting_period → target_table: asset_period_financial_profile, target_column: accounting_period"
+- WRONG: Classifying asset_period_financial_profile.accounting_period as Depth 1 ✗
+- CORRECT: It's Depth 2 because it depends on gl_period_balances (Depth 1), not directly on financial_activity_summary
 
 CRITICAL RULES FOR INCLUDING COLUMNS:
-1. Depth 1: ONLY include columns where snippets explicitly show: changed_column → target_column
-2. Depth 2: ONLY include columns where snippets explicitly show: depth1_column → target_column
+1. Depth 1: ONLY columns where snippets show: source_table={source_table} AND source_column={source_column} → target_table.target_column
+2. Depth 2: ONLY columns where snippets show: depth1_table.depth1_column → target_table.target_column AND NO snippet shows source_table={source_table} AND source_column={source_column} → target_table.target_column
 3. DO NOT include all columns from a table just because one column in that table has a dependency
 4. For example, if "scenariocd → allocationtype" is found, ONLY list "allocationtype" in source_metadata, NOT other columns from allocationrule table
 
@@ -714,9 +773,24 @@ def schema_detection_rag(change_text: str, org_id: str, cfg: Optional[IterativeC
     all_snippets_text = _docs_to_snippets(collected_docs) if collected_docs else "(no snippets retrieved)"
     
     # Include parsed change info in the final prompt for better context
-    change_context = f"{change_text}\n\nParsed Information:\n- Change Type: {parsed_change.get('change_type', 'UNKNOWN')}\n- Table: {parsed_change.get('table_full_path', 'UNKNOWN')}\n- Column: {parsed_change.get('column_name', 'UNKNOWN')}"
+    source_table = parsed_change.get('table_full_path', 'UNKNOWN')
+    source_column = parsed_change.get('column_name', 'UNKNOWN')
+    change_context = (
+        f"{change_text}\n\nParsed Information:\n"
+        f"- Change Type: {parsed_change.get('change_type', 'UNKNOWN')}\n"
+        f"- Source Table: {source_table}\n"
+        f"- Source Column: {source_column}"
+    )
     
-    final = LLM.invoke(FINAL_REPORT_PROMPT.format(change=change_context, snippets=all_snippets_text))
+    # Format prompt with explicit source information for depth classification
+    formatted_prompt = FINAL_REPORT_PROMPT.format(
+        change=change_context,
+        snippets=all_snippets_text,
+        source_table=source_table,
+        source_column=source_column
+    )
+    
+    final = LLM.invoke(formatted_prompt)
     final_text = final.content if hasattr(final, "content") else str(final)
     final_json_response = _safe_json_parse(final_text)
     
