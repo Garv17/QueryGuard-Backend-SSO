@@ -256,19 +256,22 @@ Your task:
 1) Parse the SQL change to identify the EXACT column being modified (e.g., if "DROP COLUMN scenariocd", the column is "scenariocd").
 2) From the snippets, find ONLY target columns that have an EXPLICIT source-to-target relationship with this specific column.
 3) DO NOT include columns just because they're in the same table as a dependent column.
-4) Suggest next queries to expand downstream dependencies (multi-hop), if any.
+4) **AGGRESSIVELY** suggest next queries to expand downstream dependencies (multi-hop) to find ALL impacted assets at ALL depth levels (depth 1, 2, 3, 4, 5+).
 5) Return a STRICT JSON as text with the following structure:
        "found_entities": ["database.schema.table.column", ...], 
        "next_queries": ["..."], 
        "notes": "..."
 
 CRITICAL RULES:
-- ONLY include columns that are explicitly shown in snippets to depend on the changed column
+- ONLY include columns that are explicitly shown in snippets to depend on the changed column (or on previously found columns)
 - If the change is "DROP COLUMN scenariocd", ONLY include columns where snippets show: source_column=scenariocd → target_column
 - DO NOT include other columns from the same target table unless they also explicitly depend on the changed column
 - For example, if snippets show "scenariocd → allocationtype", ONLY include "allocationtype", NOT "accountfrom", "accountto", etc.
-- If no further queries are useful, return an empty list for "next_queries".
+- **IMPORTANT FOR NEXT_QUERIES**: You MUST be aggressive in finding downstream dependencies. For EACH found entity, generate a query to find its downstream dependencies. Continue this pattern to find depth 3, 4, 5+ dependencies.
+- **DO NOT stop early**: Even if you think you've found enough, continue generating queries for entities that might have further downstream dependencies.
+- Only return an empty list for "next_queries" if you are absolutely certain there are NO more downstream dependencies at ANY depth level.
 - Prefer exact entity strings from the snippets for next queries (e.g., "bronze.accounts.allocationrule.allocationtype").
+- For each found entity, create a query like: "What are the downstream dependencies of database.schema.table.column?"
 
 SQL/Schema Change:
 {change}
@@ -417,7 +420,21 @@ _List ONLY impacted downstream targets that have EXPLICIT dependencies on the ch
    **Target Column:** ...
    **Explanation:** _(Explain how this SPECIFIC column depends on a specific depth 1 column)_
 
-(Continue for depth 3, 4, etc. ONLY if explicit dependencies are found)
+#### Depth 3 (ONLY columns that explicitly depend on depth 2 columns):
+1. **Target Database:** ...
+   **Target Schema:** ...
+   **Target Table:** ...
+   **Target Column:** ...
+   **Explanation:** _(Explain how this SPECIFIC column depends on a specific depth 2 column)_
+
+#### Depth 4 (ONLY columns that explicitly depend on depth 3 columns):
+1. **Target Database:** ...
+   **Target Schema:** ...
+   **Target Table:** ...
+   **Target Column:** ...
+   **Explanation:** _(Explain how this SPECIFIC column depends on a specific depth 3 column)_
+
+(Continue for depth 5, 6, 7, etc. as needed. DO NOT stop at depth 2 - continue analyzing ALL depth levels until you've covered ALL dependencies found in the snippets. The goal is to find 10-20 impacted assets across ALL depth levels, not just depth 1 and 2.)
 
 ---
 
@@ -710,9 +727,11 @@ def validate_impact_metadata(source_metadata: List[Dict[str, Any]], parsed_chang
 
 
 class IterativeConfig(BaseModel):
-    max_iters: int = 5
+    max_iters: int = 10  # Increased default to allow deeper traversal
     k_per_query: int = 8
     dedupe: bool = True
+    max_assets: int = 20  # Target number of assets to find before stopping
+    min_assets: int = 10  # Minimum number of assets before considering stopping
 
 
 def schema_detection_rag(change_text: str, org_id: str, cfg: Optional[IterativeConfig] = None):
@@ -734,18 +753,23 @@ def schema_detection_rag(change_text: str, org_id: str, cfg: Optional[IterativeC
     used_queries: List[str] = []
     collected_docs: List[Document] = []
     seen_texts: Set[str] = set()
+    seen_entities: Set[str] = set()  # Track unique entities found
     frontier: List[str] = initial_queries
     retriever = get_retriever(org_id, k=cfg.k_per_query)
 
-    for _ in range(cfg.max_iters):
+    iteration = 0
+    while iteration < cfg.max_iters:
         new_docs: List[Document] = []
         for q in frontier:
+            if q in used_queries:
+                continue
             used_queries.append(q)
             docs = retriever.get_relevant_documents(q)
             try:
                 logger.info(
-                    "lineage.retrieval - org=%s query_len=%d docs=%d",
+                    "lineage.retrieval - org=%s iteration=%d query_len=%d docs=%d",
                     org_id,
+                    iteration + 1,
                     len(q or ""),
                     len(docs or []),
                 )
@@ -759,16 +783,174 @@ def schema_detection_rag(change_text: str, org_id: str, cfg: Optional[IterativeC
                     seen_texts.add(d.page_content)
                     new_docs.append(d)
                     collected_docs.append(d)
+        
         if not new_docs:
+            logger.info("No new documents found at iteration %d, stopping", iteration + 1)
             break
+        
+        # Count unique entities found so far (approximate by counting unique target columns)
+        # This is a heuristic - we count unique target_table.target_column combinations
+        # Extract entities from all collected docs (not just new ones) to get accurate count
+        for doc in collected_docs:
+            content = doc.page_content
+            # Try to extract target entities from document content
+            # Look for patterns like "target_table: X" and "target_column: Y"
+            # Handle both single-line and multi-line patterns
+            lines = content.split('\n')
+            current_table = None
+            current_column = None
+            current_db = None
+            current_schema = None
+            
+            for line in lines:
+                line_lower = line.lower().strip()
+                if 'target_database:' in line_lower:
+                    db_match = re.search(r'target_database:\s*(\S+)', line, re.IGNORECASE)
+                    if db_match:
+                        current_db = db_match.group(1).strip()
+                if 'target_schema:' in line_lower:
+                    schema_match = re.search(r'target_schema:\s*(\S+)', line, re.IGNORECASE)
+                    if schema_match:
+                        current_schema = schema_match.group(1).strip()
+                if 'target_table:' in line_lower:
+                    table_match = re.search(r'target_table:\s*(\S+)', line, re.IGNORECASE)
+                    if table_match:
+                        current_table = table_match.group(1).strip()
+                if 'target_column:' in line_lower:
+                    col_match = re.search(r'target_column:\s*(\S+)', line, re.IGNORECASE)
+                    if col_match:
+                        current_column = col_match.group(1).strip()
+                        # Build entity key
+                        if current_table and current_column:
+                            if current_db and current_schema:
+                                entity_key = f"{current_db}.{current_schema}.{current_table}.{current_column}".lower()
+                            elif current_schema:
+                                entity_key = f"{current_schema}.{current_table}.{current_column}".lower()
+                            else:
+                                entity_key = f"{current_table}.{current_column}".lower()
+                            seen_entities.add(entity_key)
+                            # Reset for next entity
+                            current_table = None
+                            current_column = None
+        
+        current_asset_count = len(seen_entities)
+        logger.info(
+            "Iteration %d: Found %d unique assets so far (target: %d-%d)",
+            iteration + 1,
+            current_asset_count,
+            cfg.min_assets,
+            cfg.max_assets,
+        )
+        
+        # Check if we've found enough assets
+        if current_asset_count >= cfg.max_assets:
+            logger.info(
+                "Reached max_assets limit (%d), stopping retrieval", cfg.max_assets
+            )
+            break
+        
         snippets_text = _docs_to_snippets(new_docs)
         plan = LLM.invoke(PLAN_PROMPT.format(change=change_text, snippets=snippets_text))
         plan_text = plan.content if hasattr(plan, "content") else str(plan)
         plan_json = _safe_json_parse(plan_text)
+        found_entities = plan_json.get("found_entities", []) or []
         next_queries: List[str] = plan_json.get("next_queries", []) or []
+        
+        # Generate queries for found entities that haven't been queried yet
+        for entity in found_entities:
+            entity_lower = entity.lower().strip()
+            if entity_lower and entity_lower not in seen_entities:
+                # Generate a query for this entity's downstream dependencies
+                query = f"What are the downstream dependencies of {entity}?"
+                if query not in used_queries:
+                    next_queries.append(query)
+        
+        # Also add any explicitly suggested queries
+        for q in next_queries:
+            if q and q not in used_queries:
+                # Check if this query is about an entity we haven't explored
+                entity_match = re.search(
+                    r"downstream.*?of\s+([^\?]+)", q, re.IGNORECASE
+                )
+                if entity_match:
+                    entity = entity_match.group(1).strip()
+                    if entity.lower() not in seen_entities:
+                        # This is a new entity to explore
+                        pass
+        
         frontier = [q for q in next_queries if q and q not in used_queries]
+        
         if not frontier:
-            break
+            # Only stop if we have minimum assets OR no more queries
+            if current_asset_count >= cfg.min_assets:
+                logger.info(
+                    "No more queries and reached min_assets (%d), stopping",
+                    cfg.min_assets,
+                )
+                break
+            else:
+                logger.info(
+                    "No more queries but only found %d assets (min: %d), continuing...",
+                    current_asset_count,
+                    cfg.min_assets,
+                )
+                # Try to generate more queries from collected docs
+                if collected_docs:
+                    # Extract more entities from collected docs to query
+                    for doc in collected_docs[-20:]:  # Check last 20 docs
+                        content = doc.page_content
+                        lines = content.split('\n')
+                        current_table = None
+                        current_column = None
+                        current_db = None
+                        current_schema = None
+                        
+                        for line in lines:
+                            line_lower = line.lower().strip()
+                            if 'target_database:' in line_lower:
+                                db_match = re.search(r'target_database:\s*(\S+)', line, re.IGNORECASE)
+                                if db_match:
+                                    current_db = db_match.group(1).strip()
+                            if 'target_schema:' in line_lower:
+                                schema_match = re.search(r'target_schema:\s*(\S+)', line, re.IGNORECASE)
+                                if schema_match:
+                                    current_schema = schema_match.group(1).strip()
+                            if 'target_table:' in line_lower:
+                                table_match = re.search(r'target_table:\s*(\S+)', line, re.IGNORECASE)
+                                if table_match:
+                                    current_table = table_match.group(1).strip()
+                            if 'target_column:' in line_lower:
+                                col_match = re.search(r'target_column:\s*(\S+)', line, re.IGNORECASE)
+                                if col_match:
+                                    current_column = col_match.group(1).strip()
+                                    # Build entity key and query
+                                    if current_table and current_column:
+                                        if current_db and current_schema:
+                                            entity_key = f"{current_db}.{current_schema}.{current_table}.{current_column}".lower()
+                                            entity_str = f"{current_db}.{current_schema}.{current_table}.{current_column}"
+                                        elif current_schema:
+                                            entity_key = f"{current_schema}.{current_table}.{current_column}".lower()
+                                            entity_str = f"{current_schema}.{current_table}.{current_column}"
+                                        else:
+                                            entity_key = f"{current_table}.{current_column}".lower()
+                                            entity_str = f"{current_table}.{current_column}"
+                                        
+                                        if entity_key not in seen_entities:
+                                            query = f"What are the downstream dependencies of {entity_str}?"
+                                            if query not in used_queries:
+                                                frontier.append(query)
+                                                logger.info(
+                                                    "Generated additional query from collected docs: %s",
+                                                    query[:100]
+                                                )
+                                                break
+                                    # Reset for next entity
+                                    current_table = None
+                                    current_column = None
+                        if frontier:
+                            break
+        
+        iteration += 1
 
     all_snippets_text = _docs_to_snippets(collected_docs) if collected_docs else "(no snippets retrieved)"
     
