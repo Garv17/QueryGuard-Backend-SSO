@@ -1,22 +1,28 @@
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 import os
-from dotenv import load_dotenv
 from typing import List, Dict, Any, Optional
 import json
 import psycopg2
 import psycopg2.extras
 from langchain.schema import Document
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 VECTOR_STORE_DIR = os.getenv("VECTOR_STORE_DIR", "chroma_collection_setup")
 LINEAGE_CSV_PATH = os.getenv("LINEAGE_CSV_PATH", "temp_lineage_data/lineage_output_deep.csv")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-embedding = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=GOOGLE_API_KEY)
-# Gemini LLM for existing functionality (impact analysis, etc.)
-LLM = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=GOOGLE_API_KEY, temperature=0.2)
+# OpenAI embedding model for vector store
+embedding = (
+    OpenAIEmbeddings(model="text-embedding-3-small", api_key=OPENAI_API_KEY)
+    if OPENAI_API_KEY
+    else None
+)
+# OpenAI LLM for existing functionality (impact analysis, etc.)
+LLM = (
+    ChatOpenAI(model="gpt-4o-mini", temperature=0.2, api_key=OPENAI_API_KEY)
+    if OPENAI_API_KEY
+    else None
+)
 # OpenAI LLM specifically for chatbot/agents
 # Use gpt-4o-mini for general chat
 CHAT_LLM = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -34,6 +40,11 @@ def get_org_vector_store(org_id: str) -> Chroma:
     """
     Returns a Chroma vector store bound to a specific org collection.
     """
+    if embedding is None:
+        raise RuntimeError(
+            "OPENAI_API_KEY environment variable is not set. "
+            "Cannot initialize vector store without embedding model."
+        )
     collection_name = f"org_{org_id}"
     db = Chroma(
         collection_name=collection_name,
@@ -201,14 +212,19 @@ def get_qa_chain(org_id: str, k: int = 5, llm=None):
     Args:
         org_id: Organization ID
         k: Number of documents to retrieve
-        llm: Optional LLM to use. If None, defaults to LLM (Gemini) for backward compatibility.
-             For chatbot tools, pass CHAT_LLM (GPT-4o-mini).
+        llm: Optional LLM to use. If None, defaults to LLM (gpt-4o-mini) for
+             backward compatibility. For chatbot tools, pass CHAT_LLM (GPT-4o-mini).
     
     Returns:
         RetrievalQA chain
     """
     if llm is None:
-        llm = LLM  # Default to Gemini for backward compatibility (non-chatbot usage)
+        llm = LLM  # Default to gpt-4o-mini for backward compatibility
+    if llm is None:
+        raise RuntimeError(
+            "OPENAI_API_KEY environment variable is not set. "
+            "Cannot create QA chain without LLM."
+        )
     
     retriever = get_retriever(org_id, k=k)
     qa_chain = RetrievalQA.from_chain_type(

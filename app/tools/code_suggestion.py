@@ -223,7 +223,7 @@ def analyze_described_changes_and_suggest_code(
         impact_result = schema_detection_rag(
             change_text=change_description,
             org_id=org_id,
-            cfg=IterativeConfig(max_iters=5)
+            cfg=IterativeConfig(max_iters=10, max_assets=20, min_assets=10)
         )
         
         impact_report = impact_result.get("impact_report", "")
