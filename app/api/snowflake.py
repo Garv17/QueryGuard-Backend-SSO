@@ -216,7 +216,7 @@ import snowflake.connector
 from app.database import get_db
 from app.utils.models import (
     ColumnLevelLineage,
-    FilterClauseColumnLineage,
+    # FilterClauseColumnLineage,
     InformationSchemacolumns,
     LineageLoadWatermark,
     SnowflakeConnection,
@@ -611,11 +611,11 @@ def dev_purge_connection_data(
             .filter(ColumnLevelLineage.connection_id == conn_uuid)
             .delete(synchronize_session=False)
         )
-        deleted_counts["filter_clause_lineage"] = (
-            db.query(FilterClauseColumnLineage)
-            .filter(FilterClauseColumnLineage.connection_id == conn_uuid)
-            .delete(synchronize_session=False)
-        )
+        # deleted_counts["filter_clause_lineage"] = (
+        #     db.query(FilterClauseColumnLineage)
+        #     .filter(FilterClauseColumnLineage.connection_id == conn_uuid)
+        #     .delete(synchronize_session=False)
+        # )
         deleted_counts["lineage_watermarks"] = (
             db.query(LineageLoadWatermark)
             .filter(LineageLoadWatermark.connection_id == conn_uuid)

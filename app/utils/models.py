@@ -424,38 +424,39 @@ class ColumnLevelLineage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     is_active = Column(Integer, nullable=False, server_default="1")
+    is_filter_clause = Column(Integer, nullable=False, server_default="0")
     
     # Relationships
     organization = relationship("Organization", foreign_keys=[org_id], backref="column_level_lineage_org_id")
     connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="column_level_lineage_conn_id")
 
-class FilterClauseColumnLineage(Base):
-    __tablename__ = "filter_clause_column_lineage"
+# class FilterClauseColumnLineage(Base):
+#     __tablename__ = "filter_clause_column_lineage"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
-    batch_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
-    source_database = Column(String, nullable=True)
-    source_schema = Column(String, nullable=True)
-    source_table = Column(String, nullable=True)
-    source_column = Column(String, nullable=True)
-    target_database = Column(String, nullable=True)
-    target_schema = Column(String, nullable=True)
-    target_table = Column(String, nullable=True)
-    target_column = Column(String, nullable=True)
-    query_id = Column(JSONB, nullable=True)  # store list of query IDs
-    query_type = Column(String, nullable=True)
-    session_id = Column(BigInteger, nullable=True)
-    dependency_score = Column(Integer, nullable=True)
-    dbt_model_file_path = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    is_active = Column(Integer, nullable=False, server_default="1")
+#     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+#     org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+#     batch_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+#     connection_id = Column(UUID(as_uuid=True), ForeignKey("snowflake_connections.id"), nullable=False, index=True)
+#     source_database = Column(String, nullable=True)
+#     source_schema = Column(String, nullable=True)
+#     source_table = Column(String, nullable=True)
+#     source_column = Column(String, nullable=True)
+#     target_database = Column(String, nullable=True)
+#     target_schema = Column(String, nullable=True)
+#     target_table = Column(String, nullable=True)
+#     target_column = Column(String, nullable=True)
+#     query_id = Column(JSONB, nullable=True)  # store list of query IDs
+#     query_type = Column(String, nullable=True)
+#     session_id = Column(BigInteger, nullable=True)
+#     dependency_score = Column(Integer, nullable=True)
+#     dbt_model_file_path = Column(String, nullable=True)
+#     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+#     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+#     is_active = Column(Integer, nullable=False, server_default="1")
     
-    # Relationships
-    organization = relationship("Organization", foreign_keys=[org_id], backref="filter_clause_column_org_id")
-    connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="filter_clause_column_conn_id")
+#     # Relationships
+#     organization = relationship("Organization", foreign_keys=[org_id], backref="filter_clause_column_org_id")
+#     connection = relationship("SnowflakeConnection", foreign_keys=[connection_id], backref="filter_clause_column_conn_id")
 
 
 class TableMetadata(Base):

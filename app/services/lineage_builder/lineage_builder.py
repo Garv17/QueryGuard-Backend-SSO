@@ -26,7 +26,7 @@ try:
     from .filter_clause_columns import get_dependent_columns
     from app.utils.models import (
         ColumnLevelLineage,
-        FilterClauseColumnLineage,
+        # FilterClauseColumnLineage,
         LineageLoadWatermark
     )
 except ImportError:
@@ -41,7 +41,7 @@ except ImportError:
         sys.path.insert(0, app_path)
     from utils.models import (
         ColumnLevelLineage,
-        FilterClauseColumnLineage,
+        # FilterClauseColumnLineage,
         LineageLoadWatermark
     )
 
@@ -668,7 +668,8 @@ def apply_scd_type2(engine, model_class, current_df: pd.DataFrame, historical_df
                     session_id=rec.get("session_id"),
                     dependency_score=rec.get("dependency_score"),
                     dbt_model_file_path=rec.get("dbt_model_file_path"),
-                    is_active=1
+                    is_active=1,
+                    is_filter_clause=rec.get("is_filter_clause", 0)
                 )
             )
         with Session(engine) as session:
@@ -866,12 +867,12 @@ def lineage_builder(org_id, conn_id, batch_id):
                         logger.info("Starting lineage processing for filter clause column lineage...")
                         if not historical_filter_clause_column_lineage_df.empty:
                             logger.info("Processing with SCD Type 2 for filter clause column lineage...")
-                            deactivated_filter_clause_column_lineage, inserted_filter_clause_column_lineage, = apply_scd_type2(pg_engine, FilterClauseColumnLineage, final_filter_clause_df, historical_filter_clause_column_lineage_df, org_id, batch_id, conn_id)
-                            logger.info(f"{deactivated_filter_clause_column_lineage} records deactivated in FilterClauseColumnLineage table, "f"{inserted_filter_clause_column_lineage} new records inserted in FilterClauseColumnLineage table.")
+                            deactivated_filter_clause_column_lineage, inserted_filter_clause_column_lineage, = apply_scd_type2(pg_engine, ColumnLevelLineage, final_filter_clause_df, historical_filter_clause_column_lineage_df, org_id, batch_id, conn_id)
+                            logger.info(f"{deactivated_filter_clause_column_lineage} records deactivated in ColumnLevelLineage table, "f"{inserted_filter_clause_column_lineage} new records inserted in ColumnLevelLineage table.")
                         else:
                             logger.info("Processing with direct insert for filter clause column lineage...")
                             inserted_count_filter_clause = insert_lineage(
-                                pg_engine, FilterClauseColumnLineage, final_filter_clause_df, org_id=org_id, batch_id=batch_id, connection_id=conn_id
+                                pg_engine, ColumnLevelLineage, final_filter_clause_df, org_id=org_id, batch_id=batch_id, connection_id=conn_id
                             )
 
                             logger.info(f"Inserted {inserted_count_filter_clause} lineage records into final_filter_clause_df")
