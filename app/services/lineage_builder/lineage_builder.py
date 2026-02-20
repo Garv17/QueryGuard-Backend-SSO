@@ -705,7 +705,8 @@ def insert_lineage(engine, model_class, df: pd.DataFrame, org_id: uuid.UUID, bat
                 query_type=row.get("query_type"),
                 session_id=row.get("session_id"),
                 dependency_score=row.get("dependency_score"),
-                dbt_model_file_path=row.get("dbt_model_file_path")
+                dbt_model_file_path=row.get("dbt_model_file_path"),
+                is_filter_clause=row.get("is_filter_clause", 0)
             )
             objects_to_insert.append(lineage_obj)
 
@@ -911,47 +912,3 @@ def lineage_builder(org_id, conn_id, batch_id):
         logger.critical("Full traceback: %s", traceback.format_exc())
         raise
 
-
-
-# if __name__ == "__main__":
-#     org_id = "76d33fb3-6062-456b-a211-4aec9971f8be"
-#     batch_id = "32f55d8f-4731-4810-aeb8-4cec0d5ae989"
-#     connection_id = "4aeb318b-6819-4873-9fae-33bab55ac922"
-#     lineage_builder(org_id, connection_id, batch_id)
-#     consolidated_df = pd.read_csv("C:/Users/User/Documents/lineage_files/11-28-2025/consolidated_df.csv")
-#     final_df = pd.read_csv("C:/Users/User/Documents/lineage_files/11-28-2025/final_df.csv")
-#     # final_df['base_objects_accessed'] = final_df['base_objects_accessed'].apply(ast.literal_eval)
-#     logger.info("Base objects accessed parsed successfully")
-#     filter_clause_df = pd.merge(consolidated_df, final_df, on="query_id", how="inner")
-#     logger.info("Filter clause DataFrame merged, %d records", len(filter_clause_df))
-    
-#     rows = get_dependent_columns(filter_clause_df)
-#     logger.info("Dependent columns extracted, %d rows", len(rows) if rows else 0)
-
-#     if rows:
-#         final_filter_clause_df = pd.DataFrame(rows)
-#         final_filter_clause_df.drop_duplicates(
-#         subset=[
-#             "source_database", "source_schema", "source_table", "source_column",
-#             "target_database", "target_schema", "target_table", "target_column"
-#         ],
-#         inplace=True
-#         )
-#         mask = ~(
-#         final_filter_clause_df["source_database"].fillna("").eq("") &
-#         final_filter_clause_df["source_schema"].fillna("").eq("")
-#         )
-
-#         final_filter_clause_df = final_filter_clause_df[mask]
-        
-#         # Add required columns for SCD Type 2 processing
-#         if not final_filter_clause_df.empty:
-#             final_filter_clause_df["org_id"] = org_id
-#             final_filter_clause_df["connection_id"] = connection_id
-#             final_filter_clause_df["batch_id"] = batch_id
-#             logger.info("Added org_id, connection_id, and batch_id columns to final_filter_clause_df")
-#     else:
-#         final_filter_clause_df = pd.DataFrame()
-
-#     final_filter_clause_df.to_csv("C:/Users/User/Documents/lineage_files/11-28-2025/final_filter_clause_df.csv", index=False)
-#     logger.info("final_filter_clause_df saved as csv")
