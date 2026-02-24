@@ -1599,7 +1599,8 @@ def get_dependent_columns(df):
                         "query_type": query_type,
                         "session_id": session_id,
                         "dependency_score": dependency_score,
-                        "dbt_model_file_path": dbt_model_file_path
+                        "dbt_model_file_path": dbt_model_file_path,
+                        "is_filter_clause": 1  # Mark this lineage as coming from a filter clause
                     })
         
             logger.info(f"Filter clause columns extracted for query id {query_id}")

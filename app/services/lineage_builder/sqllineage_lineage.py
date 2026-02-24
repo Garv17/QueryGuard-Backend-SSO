@@ -25,8 +25,8 @@ from app.utils.models import (
     SnowflakeQueryRecord,
     InformationSchemacolumns,
     LineageLoadWatermark,
-    ColumnLevelLineage,
-    FilterClauseColumnLineage
+    ColumnLevelLineage
+    # FilterClauseColumnLineage
 )
 
 # Logging Setup
@@ -82,14 +82,14 @@ def fetch_query_access_history_and_information_schema_columns(engine, org_id, co
         # Fetch historical column level lineage
         historical_column_level_lineage = (
             session.query(ColumnLevelLineage)
-            .filter_by(connection_id=conn_id, org_id=org_id, is_active=1)
+            .filter_by(connection_id=conn_id, org_id=org_id, is_active=1, is_filter_clause=0)
             .all()
         )
 
         # Fetch historical filter clause column lineage
         historical_filter_clause_column_lineage = (
-            session.query(FilterClauseColumnLineage)
-            .filter_by(connection_id=conn_id, org_id=org_id, is_active=1)
+            session.query(ColumnLevelLineage)
+            .filter_by(connection_id=conn_id, org_id=org_id, is_active=1, is_filter_clause=1)
             .all()
         )
 
@@ -116,7 +116,7 @@ def fetch_query_access_history_and_information_schema_columns(engine, org_id, co
             historical_filter_clause_column_lineage_df = pd.DataFrame([r.__dict__ for r in historical_filter_clause_column_lineage])
             historical_filter_clause_column_lineage_df = historical_filter_clause_column_lineage_df.drop("_sa_instance_state", axis=1, errors="ignore")
         else:
-            historical_filter_clause_column_lineage_df = pd.DataFrame(columns=[col.name for col in FilterClauseColumnLineage.__table__.columns])
+            historical_filter_clause_column_lineage_df = pd.DataFrame(columns=[col.name for col in ColumnLevelLineage.__table__.columns])
 
         return query_history_df, info_schema_df, historical_column_level_lineage_df, historical_filter_clause_column_lineage_df
 
