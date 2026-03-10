@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>QueryGuardAI Login</title>
+    <style>
+        body{
+            font-family: Arial;
+            background:#f4f6f9;
+            display:flex;
+            justify-content:center;
+            align-items:center;
+            height:100vh;
+        }
+
+        .card{
+            background:white;
+            padding:40px;
+            border-radius:10px;
+            width:350px;
+            box-shadow:0 5px 15px rgba(0,0,0,0.1);
+            text-align:center;
+        }
+
+        input{
+            width:100%;
+            padding:10px;
+            margin:10px 0;
+            border-radius:5px;
+            border:1px solid #ccc;
+        }
+
+        button{
+            width:100%;
+            padding:10px;
+            border:none;
+            border-radius:5px;
+            cursor:pointer;
+        }
+
+        .login{
+            background:#0078d4;
+            color:white;
+        }
+
+        .sso{
+            background:#2f2f2f;
+            color:white;
+            margin-top:10px;
+        }
+
+        .logout{
+            background:#d9534f;
+            color:white;
+            margin-top:10px;
+        }
+
+        #response{
+            margin-top:20px;
+            font-size:12px;
+            word-wrap:break-word;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="card">
+
+<h2>QueryGuardAI Login</h2>
+
+<input id="username" placeholder="Username">
+<input id="password" type="password" placeholder="Password">
+
+<button class="login" onclick="login()">Login</button>
+
+<button class="sso" onclick="ssoLogin()">Login with Microsoft</button>
+
+<button class="logout" onclick="logout()">Logout</button>
+
+<div id="response"></div>
+
+</div>
+
+<script>
+
+async function login(){
+
+    let username = document.getElementById("username").value
+    let password = document.getElementById("password").value
+
+    let res = await fetch("http://localhost:8000/auth/login",{
+        method:"POST",
+        headers:{
+            "Content-Type":"application/json"
+        },
+        body:JSON.stringify({
+            username:username,
+            password:password
+        })
+    })
+
+    let data = await res.json()
+
+    document.getElementById("response").innerText =
+        JSON.stringify(data,null,2)
+
+    if(data.access_token){
+        localStorage.setItem("token",data.access_token)
+    }
+}
+
+async function ssoLogin(){
+
+    let res = await fetch("http://localhost:8000/auth/sso/login")
+    let data = await res.json()
+
+    window.location.href = data.login_url
+}
+
+async function logout(){
+
+    let token = localStorage.getItem("token")
+
+    let res = await fetch("http://localhost:8000/auth/logout",{
+        method:"POST",
+        headers:{
+            "Authorization":"Bearer "+token
+        }
+    })
+
+    let data = await res.json()
+
+    document.getElementById("response").innerText =
+        JSON.stringify(data,null,2)
+
+    localStorage.removeItem("token")
+}
+
+</script>
+
+</body>
+</html>
