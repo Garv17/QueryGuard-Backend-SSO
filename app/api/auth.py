@@ -33,17 +33,19 @@ import logging
 # Azure Group → Role mapping
 AZURE_GROUP_ROLE_MAP = {}
 
-if os.getenv("AZURE_MEMBER_GROUP_ID"):
-    AZURE_GROUP_ROLE_MAP[os.getenv("AZURE_MEMBER_GROUP_ID")] = MEMBER
+if os.getenv("AZURE_PRODUCT_SUPPORT_GROUP_ID"):
+    AZURE_GROUP_ROLE_MAP[os.getenv("AZURE_PRODUCT_SUPPORT_GROUP_ID")] = PRODUCT_SUPPORT_ADMIN
+    
+if os.getenv("AZURE_SYSTEM_ADMIN_GROUP_ID"):
+    AZURE_GROUP_ROLE_MAP[os.getenv("AZURE_SYSTEM_ADMIN_GROUP_ID")] = SYSTEM_ADMIN
 
 if os.getenv("AZURE_ORG_ADMIN_GROUP_ID"):
     AZURE_GROUP_ROLE_MAP[os.getenv("AZURE_ORG_ADMIN_GROUP_ID")] = ORGANIZATION_ADMIN
 
-if os.getenv("AZURE_SYSTEM_ADMIN_GROUP_ID"):
-    AZURE_GROUP_ROLE_MAP[os.getenv("AZURE_SYSTEM_ADMIN_GROUP_ID")] = SYSTEM_ADMIN
+if os.getenv("AZURE_MEMBER_GROUP_ID"):
+    AZURE_GROUP_ROLE_MAP[os.getenv("AZURE_MEMBER_GROUP_ID")] = MEMBER
 
-if os.getenv("AZURE_PRODUCT_SUPPORT_GROUP_ID"):
-    AZURE_GROUP_ROLE_MAP[os.getenv("AZURE_PRODUCT_SUPPORT_GROUP_ID")] = PRODUCT_SUPPORT_ADMIN
+
 router = APIRouter(prefix="/auth", tags=["Auth"])
 logger = logging.getLogger("auth")
 
@@ -222,12 +224,14 @@ def signup(user: UserSignup, org_id: str, db: Session = Depends(get_db), request
 
     # Public signup always creates MEMBER role users
     new_user = User(
-        username=user.username,
-        email=user.email,
-        password_hash=hash_password(user.password),
-        org_id=org_uuid,
-        role=MEMBER
-    )
+    username=user.username,
+    email=user.email,
+    password_hash=hash_password(user.password),
+    org_id=org_uuid,
+    role=MEMBER,
+    auth_method="LOCAL",
+    is_current=True
+)
     
     try:
         db.add(new_user)
@@ -247,13 +251,9 @@ def sso_login():
     login_url = get_azure_auth_url() + "&prompt=login" 
     return {"login_url": login_url}
 
-
 @router.post("/login", response_model=LoginResponse)
 def login(user: UserLogin, db: Session = Depends(get_db)):
-    """
-    Rule 1 & 2: Local login with strict SSO enforcement.
-    """
-    # Fetch current user record
+    
     db_user = db.query(User).filter(
         User.username == user.username,
         User.is_current == True
@@ -262,38 +262,39 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # 🔹 RULE 1 ENFORCEMENT
-    # Only SYSTEM_ADMIN and PRODUCT_SUPPORT_ADMIN can use username/password
-    allowed_local_roles = [PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN]
-
-    if db_user.role not in allowed_local_roles:
-        # Force redirect to SSO in the UI by throwing a 403
+    # Block SSO-only users
+    if db_user.auth_method == "SSO":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="MEMBER and ORG_ADMIN roles must login via Microsoft SSO."
+            status_code=403,
+            detail="This account must login using Microsoft SSO."
         )
 
-    # 🔹 RULE 2: Verify password for allowed roles
+    # Verify password
     if db_user.password_hash != hash_password(user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    # Generate JWT Token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    token = create_access_token(data={"sub": str(db_user.id)}, expires_delta=access_token_expires)
 
-    # Store token in DB
-    token_record = UserToken(user_id=db_user.id, token=token, expires_at=datetime.utcnow() + access_token_expires)
+    token = create_access_token(
+        data={"sub": str(db_user.id)},
+        expires_delta=access_token_expires
+    )
+
+    token_record = UserToken(
+        user_id=db_user.id,
+        token=token,
+        expires_at=datetime.utcnow() + access_token_expires
+    )
+
     db.add(token_record)
     db.commit()
 
     return {
         "access_token": token,
         "token_type": "bearer",
-        "is_connection_setup": True, # Simplified for example
+        "is_connection_setup": True,
         "missing_connectors": []
     }
-
-
 # --- auth.py changes ---
 @router.get("/callback")
 def azure_callback(code: str, db: Session = Depends(get_db)):
@@ -311,20 +312,19 @@ def azure_callback(code: str, db: Session = Depends(get_db)):
     # Default role
     role = None
 
-    for group_id in groups:
-        if group_id == os.getenv("AZURE_PRODUCT_SUPPORT_GROUP_ID"):
-            role = PRODUCT_SUPPORT_ADMIN
-            break
-        elif group_id == os.getenv("AZURE_SYSTEM_ADMIN_GROUP_ID"):
-            role = SYSTEM_ADMIN
-            break
-        elif group_id == os.getenv("AZURE_ORG_ADMIN_GROUP_ID"):
-            role = ORGANIZATION_ADMIN
-            break
-        
-        elif group_id == os.getenv("AZURE_MEMBER_GROUP_ID"):
-            role = MEMBER
-            break
+    if os.getenv("AZURE_SYSTEM_ADMIN_GROUP_ID") in groups:
+        role = SYSTEM_ADMIN
+
+    elif os.getenv("AZURE_ORG_ADMIN_GROUP_ID") in groups:
+        role = ORGANIZATION_ADMIN
+
+    elif os.getenv("AZURE_PRODUCT_SUPPORT_GROUP_ID") in groups:
+        role = PRODUCT_SUPPORT_ADMIN
+
+    elif os.getenv("AZURE_MEMBER_GROUP_ID") in groups:
+        role = MEMBER
+
+
     if role is None:
         raise HTTPException(
             status_code=403,
@@ -333,6 +333,12 @@ def azure_callback(code: str, db: Session = Depends(get_db)):
 
     # Find user
     db_user = db.query(User).filter(User.email == email, User.is_current == True).first()
+
+    # Enforce auth method
+    if db_user and db_user.auth_method == "LOCAL":
+     return RedirectResponse(
+        url="/login?error=local_login_required"
+    )
 
     if not db_user:
         organization = db.query(Organization).filter(Organization.is_active == True).first()
@@ -395,6 +401,15 @@ def azure_callback(code: str, db: Session = Depends(get_db)):
 def forgot_password(req: ForgotPassword, db: Session = Depends(get_db), request: Request = None):
     logger.info("POST /auth/forgot-password - email=%s ip=%s", req.email, request.client.host if request and request.client else "unknown")
     user = db.query(User).filter(User.email == req.email, User.is_current == True).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Email not found")
+
+    if user.auth_method == "SSO":
+        raise HTTPException(
+        status_code=400,
+        detail="Password reset not allowed for SSO users"
+    )
     if not user:
         logger.warning("/auth/forgot-password - email not found: %s", req.email)
         raise HTTPException(status_code=404, detail="Email not found")
@@ -426,7 +441,7 @@ def reset_password(req: ResetPassword, db: Session = Depends(get_db), request: R
     user = db.query(User).filter(
         User.password_reset_token == req.token,
         User.password_reset_token_expires > datetime.utcnow(),
-        User.is_active == True
+        User.is_current == True
     ).first()
     
     if not user:

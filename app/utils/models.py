@@ -35,7 +35,8 @@ class User(Base):
     
     # NEW: Enforcement flag
     auth_method = Column(String(20), default="SSO") # 'LOCAL', 'SSO', or 'BOTH'
-
+    password_reset_token = Column(String(255), nullable=True)
+    password_reset_token_expires = Column(DateTime(timezone=True), nullable=True)
     organization = relationship("Organization", back_populates="users")
 
 
