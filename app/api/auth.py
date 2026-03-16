@@ -8,7 +8,7 @@
 
 from fastapi import APIRouter, HTTPException, Depends, status, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from uuid import UUID
 from jose import jwt
 from datetime import datetime, timedelta
@@ -55,24 +55,24 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 # --- Models ---
 class UserSignup(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=3, max_length=255 , pattern="^[a-zA-Z0-9_.-]+$")
+    password: str = Field(..., min_length=8, max_length=128)
     email: EmailStr
 
 class UserLogin(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=1, max_length=255, pattern="^[a-zA-Z0-9_.-]+$")
+    password: str = Field(..., min_length=1, max_length=128)
 
 class ForgotPassword(BaseModel):
     email: EmailStr
 
 class ResetPassword(BaseModel):
     token: str
-    new_password: str
+    new_password: str = Field(..., min_length=8, max_length=128)
 
 class ChangePassword(BaseModel):
-    current_password: str
-    new_password: str
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8)
 
 class UserResponse(BaseModel):
     id: UUID
@@ -244,7 +244,7 @@ def signup(user: UserSignup, org_id: str, db: Session = Depends(get_db), request
         logger.exception("/auth/signup - registration failed due to IntegrityError")
         raise HTTPException(status_code=400, detail="Registration failed")
 
-@router.get("/sso/login")
+@router.get("/sso/ ")
 def sso_login():
     """Endpoint to trigger the Microsoft SSO flow with forced re-authentication"""
     # We add prompt="login" to ensure the Microsoft UI appears every time
@@ -297,19 +297,46 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     }
 # --- auth.py changes ---
 @router.get("/callback")
-def azure_callback(code: str, db: Session = Depends(get_db)):
+def azure_callback(code: str = None, db: Session = Depends(get_db)):
     logger.info("Azure callback initiated.")
 
-    # Exchange code for Azure token
-    id_token = validate_azure_token(code)
+    # --- Edge Case 1: Missing authorization code ---
+    if not code:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing authorization code from Azure"
+        )
 
-    # Decode token claims
-    azure_payload = verify_azure_token(id_token)
+    # --- Exchange code for Azure token ---
+    try:
+        id_token = validate_azure_token(code)
+    except Exception as e:
+        logger.error("Azure token exchange failed: %s", str(e))
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired Azure authorization code"
+        )
+
+    # --- Decode token claims ---
+    try:
+        azure_payload = verify_azure_token(id_token)
+    except Exception as e:
+        logger.error("Azure token verification failed: %s", str(e))
+        raise HTTPException(
+            status_code=401,
+            detail="Azure token verification failed"
+        )
 
     email = azure_payload.get("email")
     groups = azure_payload.get("groups", [])
 
-    # Default role
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Email not present in Azure token"
+        )
+
+    # --- Determine role based on Azure group ---
     role = None
 
     if os.getenv("AZURE_SYSTEM_ADMIN_GROUP_ID") in groups:
@@ -324,30 +351,37 @@ def azure_callback(code: str, db: Session = Depends(get_db)):
     elif os.getenv("AZURE_MEMBER_GROUP_ID") in groups:
         role = MEMBER
 
-
+    # --- Edge Case: User not in any allowed Azure group ---
     if role is None:
         raise HTTPException(
             status_code=403,
             detail="Access denied. You are not assigned to any authorized Azure AD group."
         )
 
-    # Find user
-    db_user = db.query(User).filter(User.email == email, User.is_current == True).first()
+    # --- Find existing user ---
+    db_user = db.query(User).filter(
+        User.email == email,
+        User.is_current == True
+    ).first()
 
-    # Enforce auth method
+    # --- Edge Case: LOCAL user attempting SSO ---
     if db_user and db_user.auth_method == "LOCAL":
-     return RedirectResponse(
-        url="/login?error=local_login_required"
-    )
+        return RedirectResponse(
+            url="/login?error=local_login_required"
+        )
 
+    # --- Create user if not exists ---
     if not db_user:
-        organization = db.query(Organization).filter(Organization.is_active == True).first()
+
+        organization = db.query(Organization).filter(
+            Organization.is_active == True
+        ).first()
 
         if not organization:
             raise HTTPException(
-            status_code=500,
-            detail="No active organization found"
-    )
+                status_code=500,
+                detail="No active organization found"
+            )
 
         db_user = User(
             username=email.split("@")[0],
@@ -360,41 +394,45 @@ def azure_callback(code: str, db: Session = Depends(get_db)):
 
         db.add(db_user)
 
+    # --- Handle role change (SCD Type 2) ---
     else:
         if db_user.role != role:
             update_user_scd(
                 db,
                 db_user.id,
                 {
-                "id": db_user.id,
-                "username": db_user.username,
-                "email": db_user.email,
-                "org_id": db_user.org_id,
-                "role": role,
-                "auth_method": "SSO"
+                    "id": db_user.id,
+                    "username": db_user.username,
+                    "email": db_user.email,
+                    "org_id": db_user.org_id,
+                    "role": role,
+                    "auth_method": "SSO"
                 }
-        )
+            )
 
     db.commit()
     db.refresh(db_user)
 
+    # --- Generate JWT token ---
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
     token = create_access_token(
         data={"sub": str(db_user.id)},
         expires_delta=access_token_expires
     )
+
     token_record = UserToken(
-    user_id=db_user.id,
-    token=token,
-    expires_at=datetime.utcnow() + access_token_expires
+        user_id=db_user.id,
+        token=token,
+        expires_at=datetime.utcnow() + access_token_expires
     )
 
     db.add(token_record)
     db.commit()
-    # redirect with token
+
+    # --- Redirect frontend with token ---
     return RedirectResponse(
-    url=f"http://localhost:8080/#access_token={token}"
+        url=f"http://localhost:8080/#access_token={token}"
     )
 
 @router.post("/forgot-password")
