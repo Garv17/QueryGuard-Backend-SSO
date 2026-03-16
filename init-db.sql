@@ -12,11 +12,6 @@
 
 -- Grant necessary permissions to the user
 -- (The user already has privileges, but ensuring they have all needed permissions)
-
--- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
 GRANT ALL PRIVILEGES ON DATABASE queryguard TO queryguard_user;
 
 -- Grant schema permissions for future tables

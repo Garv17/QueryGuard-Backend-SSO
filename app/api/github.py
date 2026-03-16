@@ -32,8 +32,8 @@ router = APIRouter(prefix="/github", tags=["GitHub"])
 
 # --- Configuration ---
 # TODO: Update these values for your GitHub App
-GITHUB_APP_URL = "https://github.com/apps/myzane-ai"
-CALLBACK_URL = "https://queryguard-backend-dev.onrender.com/github/callback"
+GITHUB_APP_URL = os.getenv("GITHUB_APP_URL")
+CALLBACK_URL = os.getenv("CALLBACK_URL")
 GITHUB_API_BASE = "https://api.github.com"
 WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "")
 GITHUB_APP_ID = os.getenv("GITHUB_APP_ID")
