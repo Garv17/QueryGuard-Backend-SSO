@@ -546,7 +546,7 @@ def github_callback(
     
     # Check if installation already exists
     existing_installation = db.query(GitHubInstallation).filter(
-        GitHubInstallation.installation_id == installation_id
+        GitHubInstallation.installation_id == installation_id,GitHubInstallation.is_active == True
     ).first()
     
     if existing_installation:

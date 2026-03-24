@@ -6,6 +6,7 @@
 # DELETE /users/{user_id} → deactivate user (soft delete)
 
 from fastapi import APIRouter, HTTPException, Depends, status, Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
@@ -14,14 +15,13 @@ from uuid import UUID
 from datetime import datetime, timedelta
 from app.database import get_db
 from app.utils.models import User, Organization
-from app.utils.auth_deps import get_current_user
 from app.api.auth import hash_password, generate_reset_token
 from app.utils.email_service import send_welcome_email, send_password_setup_email
 import secrets
 from app.utils.rbac import (
     PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, ORGANIZATION_ADMIN, MEMBER,
     VALID_ROLES, require_minimum_role, check_role_assignment, 
-    check_organization_access, can_access_organization
+    check_organization_access
 )
 import uuid
 import logging
@@ -41,7 +41,6 @@ class UpdateUserRequest(BaseModel):
     username: Optional[str] = None
     email: Optional[EmailStr] = None
     role: Optional[str] = None
-    is_active: Optional[bool] = None
     password: Optional[str] = None  # Optional password update
 
 class UserResponse(BaseModel):
@@ -115,13 +114,14 @@ def create_user(
         raise HTTPException(status_code=400, detail="Invalid organization ID or organization is inactive")
     
     # Check if username already exists
-    existing_user = db.query(User).filter(User.username == user.username).first()
+    existing_user = db.query(User).filter(
+        func.lower(User.username) == user.username.lower(), User.is_active == True).first()
     if existing_user:
         logger.warning("/users - create: username exists %s", user.username)
         raise HTTPException(status_code=400, detail="Username already exists")
     
     # Check if email already exists
-    existing_email = db.query(User).filter(User.email == user.email).first()
+    existing_email = db.query(User).filter(func.lower(User.email) == user.email.lower(), User.is_active == True).first()
     if existing_email:
         logger.warning("/users - create: email exists %s", user.email)
         raise HTTPException(status_code=400, detail="Email already exists")
@@ -142,8 +142,8 @@ def create_user(
     
     # Create user first
     new_user = User(
-        username=user.username,
-        email=user.email,
+        username=user.username.lower(),
+        email=user.email.lower(),
         password_hash=password_hash,
         org_id=org_uuid,
         role=user.role,
@@ -190,7 +190,7 @@ def list_users(
     """
     logger.info("GET /users - request by user_id=%s org_id=%s", current_user.id, org_id)
     
-    query = db.query(User)
+    query = db.query(User).filter(User.is_active == True)
     
     # Filter by organization
     if org_id:
@@ -231,7 +231,7 @@ def get_user(
         logger.warning("/users - get: invalid id %s", user_id)
         raise HTTPException(status_code=400, detail="Invalid user ID format")
 
-    user = db.query(User).filter(User.id == user_uuid).first()
+    user = db.query(User).filter(User.id == user_uuid, User.is_active == True).first()
     if not user:
         logger.warning("/users - get: not found %s", user_uuid)
         raise HTTPException(status_code=404, detail="User not found")
@@ -240,7 +240,6 @@ def get_user(
     check_organization_access(current_user, str(user.org_id))
     
     return user
-
 
 @router.put("/{user_id}", response_model=UserResponse)
 def update_user(
@@ -251,77 +250,92 @@ def update_user(
     request: Request = None
 ):
     """
-    Update user details.
-    PRODUCT_SUPPORT_ADMIN can update any user.
-    Others can only update users from their own organization.
-    Role changes are validated based on assigner's permissions.
+    Update user details 
     """
+
+    # --- Validate UUID ---
     try:
         user_uuid = uuid.UUID(user_id)
     except ValueError:
         logger.warning("/users - update: invalid id %s", user_id)
         raise HTTPException(status_code=400, detail="Invalid user ID format")
 
-    user = db.query(User).filter(User.id == user_uuid).first()
+    user = db.query(User).filter(
+        User.id == user_uuid,
+        User.is_active == True
+    ).first()
+
     if not user:
         logger.warning("/users - update: not found %s", user_uuid)
         raise HTTPException(status_code=404, detail="User not found")
-    
-    # Check if current user can modify this user
+
+    # --- Authorization check ---
     if not can_modify_user(current_user, user):
-        logger.warning("/users - update: access denied user_id=%s target_user_id=%s", 
-                      current_user.id, user_uuid)
+        logger.warning("/users - update: access denied user_id=%s target_user_id=%s",
+                       current_user.id, user_uuid)
         raise HTTPException(status_code=403, detail="You do not have permission to modify this user")
-    
-    # Validate role if being updated
+
+    # --- Validate role ---
     if user_update.role is not None:
         if user_update.role not in VALID_ROLES:
-            logger.warning("/users - update: invalid role %s", user_update.role)
-            raise HTTPException(status_code=400, detail=f"Invalid role. Valid roles: {', '.join(VALID_ROLES)}")
-        
-        # Check if current user can assign the new role
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid role. Valid roles: {', '.join(VALID_ROLES)}"
+            )
         check_role_assignment(current_user, user_update.role, str(user.org_id))
-    
-    # Update fields if provided
+
+    # --- Validate username uniqueness ---
     if user_update.username is not None:
-        # Check if new username already exists (excluding current user)
         existing_user = db.query(User).filter(
-            User.username == user_update.username,
+            func.lower(User.username) == user_update.username.lower(),User.is_active == True,
             User.id != user_uuid
         ).first()
         if existing_user:
-            logger.warning("/users - update: username exists %s", user_update.username)
             raise HTTPException(status_code=400, detail="Username already exists")
-        user.username = user_update.username
 
+    # --- Validate email uniqueness ---
     if user_update.email is not None:
-        # Check if new email already exists (excluding current user)
         existing_email = db.query(User).filter(
-            User.email == user_update.email,
+            func.lower(User.email) == user_update.email.lower(), User.is_active == True,
             User.id != user_uuid
         ).first()
         if existing_email:
-            logger.warning("/users - update: email exists %s", user_update.email)
             raise HTTPException(status_code=400, detail="Email already exists")
-        user.email = user_update.email
 
-    if user_update.role is not None:
+    # --- CHECK: is anything actually changing? ---
+    if not any([
+        user_update.username,
+        user_update.email,
+        user_update.role,
+        user_update.password
+    ]):
+        return user  # nothing to update
+
+    # --- SIMPLE UPDATE ---
+
+    if user_update.username:
+        user.username = user_update.username.lower()
+
+    if user_update.email:
+        user.email = user_update.email.lower()
+
+    if user_update.role:
         user.role = user_update.role
 
-    if user_update.is_active is not None:
-        user.is_active = user_update.is_active
-
-    if user_update.password is not None:
+    if user_update.password:
         user.password_hash = hash_password(user_update.password)
 
     try:
         db.commit()
         db.refresh(user)
-        logger.info("/users - updated id=%s by user_id=%s", user.id, current_user.id)
+
+        logger.info("/users - updated id=%s by user_id=%s",
+                user.id, current_user.id)
+
         return user
+
     except IntegrityError:
         db.rollback()
-        logger.exception("/users - update failed")
         raise HTTPException(status_code=400, detail="Failed to update user")
 
 

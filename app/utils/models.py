@@ -6,45 +6,41 @@ from app.database import Base
 import uuid
 
 
-class Organization(Base):
-    __tablename__ = "organizations"
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(100), nullable=False, index=True)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    users = relationship("User", back_populates="organization")
-    is_connection_setup = Column(Boolean, default=False)
+
 
 class User(Base):
-    __tablename__ = "users"
-
-    # pk_id is unique per version. id is unique per human user (Business Key).
-    pk_id = Column(Integer, primary_key=True, autoincrement=True) 
-    id = Column(UUID(as_uuid=True), index=True, default=uuid.uuid4)
-    
-    username = Column(String(50), nullable=False)
-    email = Column(String(100), nullable=False, index=True)
-    password_hash = Column(String(255), nullable=True) # Nullable for SSO users
+    __tablename__ = "users" 
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    username = Column(String(50), nullable=False, index=True, unique =True)
+    email = Column(String(100), nullable=False, index=True, unique =True)
+    password_hash = Column(String(255), nullable=True) 
     org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
-    role = Column(String(50), nullable=False) # PRODUCT_SUPPORT_ADMIN, etc.
-    
-    # NEW: Tracking for SCD Type 2
-    effective_from = Column(DateTime(timezone=True), server_default=func.now())
-    effective_to = Column(DateTime(timezone=True), nullable=True)
-    is_current = Column(Boolean, default=True, index=True) # True = current active version
-    
-    # NEW: Enforcement flag
-    auth_method = Column(String(20), default="SSO") # 'LOCAL', 'SSO', or 'BOTH'
+    role = Column(String(50), nullable=False) 
+    is_active = Column(Boolean, default=True) 
+    auth_method = Column(String(20), default="LOCAL") # 'LOCAL', 'SSO', or 'BOTH'
     password_reset_token = Column(String(255), nullable=True)
     password_reset_token_expires = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     organization = relationship("Organization", back_populates="users")
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, unique=True, nullable=False)
+    azure_tenant_id = Column(String, unique=True, nullable=True)
+    is_active = Column(Boolean, default=True)
+    users = relationship("User", back_populates="organization")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 class UserToken(Base):
     __tablename__ = "user_tokens"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     token = Column(Text, nullable=False, unique=True, index=True)
     expires_at = Column(DateTime, nullable=False)
     is_revoked = Column(Boolean, default=False)

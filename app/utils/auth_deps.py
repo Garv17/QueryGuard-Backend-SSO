@@ -44,9 +44,14 @@ def get_current_user(
     if not token_record:
         raise HTTPException(status_code=401, detail="Token revoked or expired")
 
-    user = db.query(User).filter(User.id == user_id, User.is_current == True).first()
+    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+
     if not user:
         raise HTTPException(status_code=401, detail="User not found or inactive")
+
+
+    if not user.organization or not user.organization.is_active:
+        raise HTTPException(status_code=403, detail="Organization is inactive")
     
     return user
 
@@ -83,8 +88,12 @@ def get_user_from_token(token: str, db: Session) -> User:
             raise HTTPException(status_code=401, detail="Token revoked or expired")
 
         user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+
         if not user:
             raise HTTPException(status_code=401, detail="User not found or inactive")
+
+        if not user.organization or not user.organization.is_active:
+            raise HTTPException(status_code=403, detail="Organization is inactive")
         
         return user
     except JWTError:

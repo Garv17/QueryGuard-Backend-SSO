@@ -6,11 +6,13 @@
 # DELETE /organizations/{org_id} → deactivate organization
 
 from fastapi import APIRouter, HTTPException, Depends, status, Request
+from sqlalchemy import Column, String, Integer,func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List, Dict
 from pydantic import BaseModel, EmailStr
 from app.database import get_db
+from app.database import Base
 from app.utils.models import Organization, User
 from app.utils.auth_deps import get_current_user
 from app.utils.rbac import require_organizations_endpoint_access, check_organization_access, PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, ORGANIZATION_ADMIN, MEMBER
@@ -75,7 +77,6 @@ class KPIMetadata(BaseModel):
     total_users: int
     organizations: List[OrganizationKPI]
 
-
 # --- Endpoints ---
 @router.post("/", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
 def create_organization(
@@ -90,19 +91,21 @@ def create_organization(
     No password is required - a password setup link will be sent via email.
     """
     # Check if organization name already exists
-    existing_org = db.query(Organization).filter(Organization.name == org.name).first()
+    existing_org = db.query(Organization).filter(func.lower(Organization.name) == org.name.lower()).first()
     if existing_org:
         logger.warning("/organizations - create: name exists %s", org.name)
         raise HTTPException(status_code=400, detail="Organization name already exists")
     
     # Check if username already exists
-    existing_user = db.query(User).filter(User.username == org.username).first()
+    existing_user = db.query(User).filter(func.lower(User.username) == org.username.lower(),
+    User.is_active == True).first()
     if existing_user:
         logger.warning("/organizations - create: username exists %s", org.username)
         raise HTTPException(status_code=400, detail="Username already exists")
     
     # Check if email already exists
-    existing_email = db.query(User).filter(User.email == org.email).first()
+    existing_email = db.query(User).filter(func.lower(User.email) == org.email.lower(),
+    User.is_active == True).first()
     if existing_email:
         logger.warning("/organizations - create: email exists %s", org.email)
         raise HTTPException(status_code=400, detail="Email already exists")
@@ -185,10 +188,12 @@ def get_organizations_kpi(
     logger.info("/organizations/kpi - request by user_id=%s", current_user.id)
     
     # Get all organizations
-    organizations = db.query(Organization).order_by(Organization.created_at).all()
+    organizations = db.query(Organization).filter(
+    Organization.is_active == True).order_by(Organization.created_at).all()
     
     # Get all users with their organizations
-    users = db.query(User).order_by(User.created_at).all()
+    users = db.query(User).filter(
+    User.is_active == True).order_by(User.created_at).all()
     
     # Group users by organization
     users_by_org: Dict[UUID, List[User]] = {}

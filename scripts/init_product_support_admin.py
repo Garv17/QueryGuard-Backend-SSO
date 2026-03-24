@@ -89,7 +89,7 @@ def create_initial_admin(db: Optional[Session] = None, return_response: bool = F
             # Check if PRODUCT_SUPPORT_ADMIN user already exists
             existing_admin = db.query(User).filter(
                 User.role == PRODUCT_SUPPORT_ADMIN,
-                User.org_id == existing_org.id
+                User.org_id == existing_org.id,
             ).first()
             
             if existing_admin:
@@ -149,8 +149,7 @@ def create_initial_admin(db: Optional[Session] = None, return_response: bool = F
         
         # Check if email already exists
         existing_email = db.query(User).filter(
-            User.email == admin_email
-        ).first()
+            User.email == admin_email).first()
         
         if existing_email:
             logger.warning(f"User with email '{admin_email}' already exists.")

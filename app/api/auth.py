@@ -12,11 +12,12 @@ from pydantic import BaseModel, EmailStr, Field
 from uuid import UUID
 from jose import jwt
 from datetime import datetime, timedelta
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.utils.models import (
-    User, UserToken, Organization,
+    User, UserToken,Organization,
     SnowflakeConnection, GitHubInstallation, JiraConnection, DbtCloudConnection
 )
 from app.utils.rbac import MEMBER, has_any_role, PRODUCT_SUPPORT_ADMIN, SYSTEM_ADMIN, ORGANIZATION_ADMIN
@@ -172,19 +173,6 @@ def get_missing_connectors(connectors_status: Dict[str, bool]) -> List[str]:
     
     return missing
 
-# Helper for SCD Type 2 updates
-def update_user_scd(db, user_id, new_data):
-    # 1. Close the current version
-    current = db.query(User).filter(User.id == user_id, User.is_current == True).first()
-    if current:
-        current.is_current = False
-        current.effective_to = datetime.utcnow()
-    
-    # 2. Create the new version
-    new_version = User(**new_data, is_current=True)
-    db.add(new_version)
-    db.commit()
-
 # --- Endpoints ---
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 def signup(user: UserSignup, org_id: str, db: Session = Depends(get_db), request: Request = None):
@@ -211,26 +199,32 @@ def signup(user: UserSignup, org_id: str, db: Session = Depends(get_db), request
         raise HTTPException(status_code=400, detail="Invalid organization ID or organization is inactive")
     
     # Check if username already exists
-    existing_user = db.query(User).filter(User.username == user.username).first()
+    existing_user = db.query(User).filter(
+    func.lower(User.username) == user.username.lower(),
+    User.is_active == True
+    ).first()
+
     if existing_user:
         logger.warning("/auth/signup - username exists: %s", user.username)
         raise HTTPException(status_code=400, detail="Username already exists")
     
     # Check if email already exists
-    existing_email = db.query(User).filter(User.email == user.email).first()
+    existing_email = db.query(User).filter(
+    func.lower(User.email) == user.email.lower(),User.is_active == True
+    ).first()
     if existing_email:
         logger.warning("/auth/signup - email exists: %s", user.email)
         raise HTTPException(status_code=400, detail="Email already exists")
 
     # Public signup always creates MEMBER role users
     new_user = User(
-    username=user.username,
-    email=user.email,
+    username=user.username.lower(),
+    email=user.email.lower(),
     password_hash=hash_password(user.password),
     org_id=org_uuid,
     role=MEMBER,
     auth_method="LOCAL",
-    is_current=True
+    is_active=True
 )
     
     try:
@@ -244,7 +238,7 @@ def signup(user: UserSignup, org_id: str, db: Session = Depends(get_db), request
         logger.exception("/auth/signup - registration failed due to IntegrityError")
         raise HTTPException(status_code=400, detail="Registration failed")
 
-@router.get("/sso/ ")
+@router.get("/sso/")
 def sso_login():
     """Endpoint to trigger the Microsoft SSO flow with forced re-authentication"""
     # We add prompt="login" to ensure the Microsoft UI appears every time
@@ -255,18 +249,20 @@ def sso_login():
 def login(user: UserLogin, db: Session = Depends(get_db)):
     
     db_user = db.query(User).filter(
-        User.username == user.username,
-        User.is_current == True
+        func.lower(User.username) == user.username.lower(),
+        User.is_active == True
     ).first()
 
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
+    if not db_user.is_active:
+        raise HTTPException(status_code=403, detail="User is disabled")
 
     # Block SSO-only users
     if db_user.auth_method == "SSO":
         raise HTTPException(
             status_code=403,
-            detail="This account must login using Microsoft SSO."
+            detail="Use Microsoft SSO to login."
         )
 
     # Verify password
@@ -300,14 +296,14 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
 def azure_callback(code: str = None, db: Session = Depends(get_db)):
     logger.info("Azure callback initiated.")
 
-    # --- Edge Case 1: Missing authorization code ---
+    # --- Validate code ---
     if not code:
         raise HTTPException(
             status_code=400,
             detail="Missing authorization code from Azure"
         )
 
-    # --- Exchange code for Azure token ---
+    # --- Exchange token ---
     try:
         id_token = validate_azure_token(code)
     except Exception as e:
@@ -317,7 +313,7 @@ def azure_callback(code: str = None, db: Session = Depends(get_db)):
             detail="Invalid or expired Azure authorization code"
         )
 
-    # --- Decode token claims ---
+    # --- Verify token ---
     try:
         azure_payload = verify_azure_token(id_token)
     except Exception as e:
@@ -329,6 +325,7 @@ def azure_callback(code: str = None, db: Session = Depends(get_db)):
 
     email = azure_payload.get("email")
     groups = azure_payload.get("groups", [])
+    tenant_id = azure_payload.get("tid")
 
     if not email:
         raise HTTPException(
@@ -336,7 +333,7 @@ def azure_callback(code: str = None, db: Session = Depends(get_db)):
             detail="Email not present in Azure token"
         )
 
-    # --- Determine role based on Azure group ---
+    # --- Role mapping ---
     role = None
 
     if os.getenv("AZURE_SYSTEM_ADMIN_GROUP_ID") in groups:
@@ -360,60 +357,70 @@ def azure_callback(code: str = None, db: Session = Depends(get_db)):
 
     # --- Find existing user ---
     db_user = db.query(User).filter(
-        User.email == email,
-        User.is_current == True
+        func.lower(User.email) == email.lower(),
+        User.is_active == True
     ).first()
 
-    # --- Edge Case: LOCAL user attempting SSO ---
-    if db_user and db_user.auth_method == "LOCAL":
-        return RedirectResponse(
-            url="/login?error=local_login_required"
+    if db_user and not db_user.is_active:
+        raise HTTPException(status_code=403, detail="User is disabled")
+
+    # --- Find organization ---
+    organization = db.query(Organization).filter(
+        Organization.azure_tenant_id == tenant_id,
+        Organization.is_active == True
+    ).first()
+
+    if not organization:
+        raise HTTPException(
+            status_code=500,
+            detail="No active organization found for this tenant"
         )
 
-    # --- Create user if not exists ---
+    # --- Create or update user ---
     if not db_user:
 
-        organization = db.query(Organization).filter(
-            Organization.is_active == True
-        ).first()
+        base_username = email.split("@")[0]
+        username = base_username
 
-        if not organization:
-            raise HTTPException(
-                status_code=500,
-                detail="No active organization found"
-            )
-
+        counter = 1
+        while db.query(User).filter(
+        func.lower(User.username) == username.lower(),User.is_active == True
+        ).first():
+            username = f"{base_username}{counter}"
+            counter += 1
+        # New SSO user
         db_user = User(
-            username=email.split("@")[0],
-            email=email,
+            username=username,
+            email=email.lower(),
             org_id=organization.id,
             role=role,
-            is_current=True,
+            is_active=True,
             auth_method="SSO"
         )
-
         db.add(db_user)
 
-    # --- Handle role change (SCD Type 2) ---
     else:
+        if db_user.org_id != organization.id:
+            logger.warning(
+            f"Org mismatch for {email}: {db_user.org_id} → {organization.id}"
+        )
+            db_user.org_id = organization.id
+        # Merge LOCAL → BOTH
+        if db_user.auth_method == "LOCAL":
+            db_user.auth_method = "BOTH"
+
         if db_user.role != role:
-            update_user_scd(
-                db,
-                db_user.id,
-                {
-                    "id": db_user.id,
-                    "username": db_user.username,
-                    "email": db_user.email,
-                    "org_id": db_user.org_id,
-                    "role": role,
-                    "auth_method": "SSO"
-                }
-            )
+            db_user.role = role
+
+            # REVOKE ALL OLD TOKENS
+        db.query(UserToken).filter(
+            UserToken.user_id == db_user.id
+        ).delete()
 
     db.commit()
     db.refresh(db_user)
 
-    # --- Generate JWT token ---
+    # --- Generate JWT ---
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
     token = create_access_token(
@@ -430,7 +437,6 @@ def azure_callback(code: str = None, db: Session = Depends(get_db)):
     db.add(token_record)
     db.commit()
 
-    # --- Redirect frontend with token ---
     return RedirectResponse(
         url=f"http://localhost:8080/#access_token={token}"
     )
@@ -438,7 +444,7 @@ def azure_callback(code: str = None, db: Session = Depends(get_db)):
 @router.post("/forgot-password")
 def forgot_password(req: ForgotPassword, db: Session = Depends(get_db), request: Request = None):
     logger.info("POST /auth/forgot-password - email=%s ip=%s", req.email, request.client.host if request and request.client else "unknown")
-    user = db.query(User).filter(User.email == req.email, User.is_current == True).first()
+    user = db.query(User).filter(func.lower(User.email) == req.email.lower()).first()
 
     if not user:
         raise HTTPException(status_code=404, detail="Email not found")
@@ -448,9 +454,6 @@ def forgot_password(req: ForgotPassword, db: Session = Depends(get_db), request:
         status_code=400,
         detail="Password reset not allowed for SSO users"
     )
-    if not user:
-        logger.warning("/auth/forgot-password - email not found: %s", req.email)
-        raise HTTPException(status_code=404, detail="Email not found")
 
     # Generate secure reset token
     reset_token = generate_reset_token()
@@ -479,7 +482,7 @@ def reset_password(req: ResetPassword, db: Session = Depends(get_db), request: R
     user = db.query(User).filter(
         User.password_reset_token == req.token,
         User.password_reset_token_expires > datetime.utcnow(),
-        User.is_current == True
+        User.is_active == True
     ).first()
     
     if not user:
