@@ -1,5 +1,5 @@
 version: '3.8'
-
+ 
 services:
   # PostgreSQL Database
   postgres:
@@ -24,7 +24,7 @@ services:
       start_period: 30s
     networks:
       - queryguard-network
-
+ 
   # QueryGuard Backend Application
   backend:
     build:
@@ -34,28 +34,36 @@ services:
     restart: unless-stopped
     environment:
       # Database Configuration
-      DATABASE_URL: postgresql+psycopg://queryguard_user:queryguard_password@postgres:5432/queryguard
-      
+      DATABASE_URL: ${DATABASE_URL}      
       # Authentication
-      SECRET_KEY: your-super-secret-key-change-in-production
-      
+      SECRET_KEY: ${SECRET_KEY}
+ 
+      # Azure SSO
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID}
+      REDIRECT_URI: ${REDIRECT_URI}
+      AZURE_SYSTEM_ADMIN_GROUP_ID: ${AZURE_SYSTEM_ADMIN_GROUP_ID}
+      AZURE_ORG_ADMIN_GROUP_ID: ${AZURE_ORG_ADMIN_GROUP_ID}
+      AZURE_MEMBER_GROUP_ID: ${AZURE_MEMBER_GROUP_ID}
+ 
       # Vector Store Configuration
       VECTOR_STORE_DIR: /app/chroma_collection_setup
       LINEAGE_CSV_PATH: /app/temp_lineage_data/lineage_output_deep.csv
-      
+     
       # Google API (Optional - add your key if using vector embeddings)
       # GOOGLE_API_KEY: your-google-api-key
-      
+     
       # GitHub App Configuration (Optional - add if using GitHub integration)
       # GITHUB_WEBHOOK_SECRET: your-github-webhook-secret
-      
+     
       # Snowflake Configuration (Optional - add if using lineage builder)
       # SNOWFLAKE_USER: your-snowflake-username
       # SNOWFLAKE_ACCOUNT: your-snowflake-account
       # SNOWFLAKE_WAREHOUSE: your-warehouse
       # SNOWFLAKE_ROLE: your-role
     ports:
-      - "8000:8000"
+      - "8080:8000"
     volumes:
       - ./temp_lineage_data:/app/temp_lineage_data
       - chroma_data:/app/chroma_collection_setup
@@ -70,13 +78,13 @@ services:
       start_period: 40s
     networks:
       - queryguard-network
-
+ 
 volumes:
   postgres_data:
     driver: local
   chroma_data:
     driver: local
-
+ 
 networks:
   queryguard-network:
     driver: bridge

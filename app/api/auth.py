@@ -437,6 +437,8 @@ def azure_callback(code: str = None, db: Session = Depends(get_db)):
     db.add(token_record)
     db.commit()
 
+    logger.info(f"Tenant ID from Azure: {tenant_id}")
+
     return RedirectResponse(
         url=f"http://localhost:8080/#access_token={token}"
     )
